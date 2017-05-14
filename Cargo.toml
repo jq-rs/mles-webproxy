@@ -5,3 +5,5 @@ authors = ["jq-rs"]
 
 [dependencies]
 iron = "0.5"
+staticfile = "0.4"
+mount = "0.3"

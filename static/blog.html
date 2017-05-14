@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mles.io Blog</title>
+<link rel="stylesheet" href="https://gitcdn.link/repo/Chalarangelo/mini.css/master/dist/mini-default.min.css" />
+<style>
+#bwidth {
+    margin: auto;
+    width: 85%;
+    padding: 10px;
+}
+</style>
+</head>
+<body>
+<div class="container">
+<div id="bwidth">
+<h2>Mles - a new protocol in Rust</h2>
+
+<p><b>jq-rs, 14.5.2017</b></p>
+
+<p>I have followed the path of Rust from early days with enthusiasm. As my own background is mostly C-language oriented, with emphasis on networking, I think I have some insight to all the problems C has, it indeed being "a quirky, flawed and enormous success" [1]. There is a tremendous effort of running additional tools to at least somewhat guarantee that large programs do what they are supposed to, if they are written with C. Selecting C-languange as a primary language to implement almost anything nowadays does not make sense, if we would have an option. And we have: Rust as a safe and concurrent systems language is a very good such option, solving most of the C-problems at compile time. And with the zero-overhead combining C-programs and Rust-programs, even more so.</p>
+
+<p>Is Rust then ready for solving networking problems and implementing new protocols? Instead of just pondering, I decided try is it able to do a new lightweight and distributed publish/subscribe data service protocol which I named Mles (<i>Modern Lightweight channEl Service</i>). Without any worthy earlier Rust experience, it would be a challenge that would really tell something about Rust networking support.</p>
+
+<p>The journey took more time than I anticipated initially, but it was certainly worth it. All implementation was done on my free time (usually when it was raining (which was often, to be honest)). I ended up writing first synchronous version of the Mles server reference implementation. Serde with Serde CBOR crate provided a great framework to build on the first versions of the Mles protocol implementation. The synchronous implementation was a good training for Rust in general, recommended to anyone familiarizing Rust network programming. </p>
+
+<p>As my final goal was fully non-blocking and lock-free server implementation, I quite quickly started to re-implement the synchronous version with Rust asynchronous I/O crate Tokio. And there was some learning curve there, as Rust/Tokio has really cool features like closures, futures and tasks which I just had not bumped into in any other language earlier. If you know e.g. Haskell, many Rust features might be quite familiar to you.</p>
+
+<p>Today, I think I am close to 1.0 release of Mles reference implementation and Mles protocol at same time. All relevant features are implemented and additional WebSocket proxy support was added in recent days, which will make the implementation maybe more relevant to users which have already WebSocket clients available. I'll publish 1.0.0 alpha-release in the near weeks, if nothing major comes up. Feel free to try and please give feedback! You can find more info at <a href="http://mles.io">http://mles.io</a>.</p>
+
+<p>I really enjoyed the journey and Rust will be my number one choice in the future. During the development, the absolutely great thing was the Rust community! I was not alone learning and solving the problems encountered. Thanks to all who helped, e.g. on the #rust IRC and Tokio Gitter channels. The Rust Book [2] is awesome! The answers to StackOverflow and Reddit are also just wonderful and complete for Rust, grand stuff. A special thanks to @pyfisch, @carllerche and @tanriol, you made a difference in this project, I appreciate it!</p>
+
+<h3>References</h3>
+<ol>
+ <li>The Development of the C Language, Dennis M. Ritchie, <a href="http://heim.ifi.uio.no/inf2270/programmer/historien-om-C.pdf">http://heim.ifi.uio.no/inf2270/programmer/historien-om-C.pdf</a></li>
+ <li>The Rust Programming Language, <a href="https://doc.rust-lang.org/book/">https://doc.rust-lang.org/book/</a></li>
+</ol>
+</div>
+</div>
+</body>
+</html>
