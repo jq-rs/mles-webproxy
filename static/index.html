@@ -16,9 +16,10 @@
 <body>
 <div class="container">
 <div id="bwidth">
-<h2>Mles overview</h2>
-
-<p><b>Mles</b> (<i>Modern Lightweight channEl Service</i>) is a lightweight, robust and fast authenticated distributed publish/subscribe data service based on Rust (a safe, concurrent and fast systems language), Tokio (asynchronous I/O for Rust) and Serde (Serialization framework for Rust). It works seamlessly with IPv4 or IPv6 on TCP, which provides its reliable data transfer backbone.</p>
+<div>
+<img src="images/mles_logo_final.png" alt="Mles logo" width="100" /><h2>Mles overview</h2>
+</div>
+<p><b>Mles</b> (<i>Modern Lightweight channEl Service</i>) is a lightweight, robust and fast authenticated distributed publish/subscribe data service based on Rust (a safe, concurrent and fast systems language), Tokio (asynchronous networking for Rust) and Serde (serialization framework for Rust). It works seamlessly with IPv4 or IPv6 on TCP, which provides its reliable data transfer backbone on Rust supported platforms, including Linux, OSX and Windows.</p>
 
 <p>Mles is based on <i>Mles protocol</i> (IANA port# 8077) which has a lightweight header structure with SipHash based authentication. The reference server implementation is lock-free (no blocking!) and supports strong session authentication between Mles client and server. With its two layer authentication scheme (1st level: server-client, 2nd level: client-client) it provides possibility for clients to authenticate each others independently from servers and also to build any additional protocol over Mles they may need. </p>
 
@@ -32,9 +33,9 @@
 
 <h2>Use cases</h2>
 
-<p>Often it is important that any data can be distributed in a scalable and properly authenticated but still reliable way. These services can take advantage using Mles as a backbone service. In a common case a client is connected directly to a public server. In another common use case is with two servers, one public server and one internal server where clients connect either to the internal server or public server directly.</p>
+<p>Often it is important that any data can be distributed in a scalable and properly authenticated but still reliable way. These services can take advantage using Mles as a backbone service. In a common case a client is connected directly to a public server. Another common use case is with two servers, one public server and one internal server which peers the public server. Clients connect either to the internal server or public server directly. There is not much limits as such, though, so feel free to try any setup you need.</p>
 
-<p>Services that would have most benefit of the Mles could be e.g. IoT telemetry and configuration distribution. For a giant large scale services, such data distribution combined with a proper TCP offload engine (TOE) could provide a very scalable distributed service or telemetry collection between any number of devices and servers.</p>
+<p>Services that could have most benefit of the Mles could be e.g. configuration distribution or IoT telemetry. For a giant large scale services, such a data distribution service combined with a proper TCP offload engine (TOE) may provide a highly scalable service. E.g. telemetry collection between any number of devices and servers could be very efficient that way.</p>
 
 <h2>Future development</h2>
 

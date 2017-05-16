@@ -15,6 +15,7 @@ use mount::Mount;
 fn main() {
 	let mut mount = Mount::new();
 	mount.mount("/", Static::new(Path::new("static/index.html")));
+	mount.mount("/images", Static::new(Path::new("static/images/")));
 	mount.mount("/blog", Static::new(Path::new("static/blog.html")));
         Iron::new(mount).http("0.0.0.0:80").unwrap();
     //Iron::new(|request: &mut Request| {
