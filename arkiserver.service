@@ -1,0 +1,12 @@
+[Unit]
+Description=Arkiserver Service
+
+[Service]
+WorkingDirectory = /home/ubuntu/www/arki-server
+ExecStart = /home/ubuntu/www/arki-server/arkiserver-manage.sh start
+ExecStop = /home/ubuntu/www/arki-server/arkiserver-manage.sh stop
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+Alias=arkiserver.service
