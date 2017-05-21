@@ -33,13 +33,13 @@
 
 <h2>Use cases</h2>
 
-<p>Often it is important that any data can be distributed in a scalable and properly authenticated but still reliable way. These services can take advantage using Mles as a backbone service. In a common case a client is connected directly to a public server. Another common use case is with two servers, one public server and one internal server which peers the public server. Clients connect either to the internal server or public server directly. There is not much limits as such, though, so feel free to try any setup you need.</p>
+<p>Often it is important that any data can be distributed in a scalable and properly authenticated but still reliable way. These services can take advantage using Mles as a backbone service. In a simple use case clients are connected directly to a public server. Another common use case is with more servers, one public server and several internal servers which peer the public server. Clients connect either to one of the internal servers or public server directly. Feel free to try any tree-like setup you need.</p>
 
-<p>Services that could have most benefit of the Mles could be e.g. configuration distribution or IoT telemetry. For a giant large scale services, such a data distribution service combined with a proper TCP offload engine (TOE) may provide a highly scalable service. E.g. telemetry collection between any number of devices and servers could be very efficient that way.</p>
+<p>Services that could have benefit of the Mles could be e.g. configuration distribution or IoT telemetry. For a giant large scale services, such a data distribution service combined with a proper TCP offload engine (TOE) should provide a highly scalable service. In general any publish/subscribe type service without the need of database on the service itself can be seen as a fine candidate as an user.</p>
 
 <h2>Future development</h2>
 
-<p>In the future reference implementation may be enhanced with new services, e.g. means to do hitless server upgrade with peer server backup support or assisting client. Even more scalable multi-core versions could be provided as a separate release although current implementation should scale very well on most use cases with proper distribution. </p>
+<p>In the future reference implementation may be enhanced with performance enhancements. Other extensions may be considered too as long as they do not change the general principles of Mles.</p>
 
 <p>Changes to the Mles protocol itself are not allowed after 1.0 release as a simple protocol means lightweight, compatible and understandable service.</p>
 
