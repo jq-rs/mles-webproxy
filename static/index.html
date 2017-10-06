@@ -17,31 +17,49 @@
 <div class="container">
 <div id="bwidth">
 <div>
-<img src="images/mles_logo_final.png" alt="Mles logo" width="100" /><h2>Mles overview</h2>
+<img src="images/mles_logo_final.png" alt="Mles logo" width="100" />
 </div>
 <p><b>Mles</b> (<i>Modern Lightweight channEl Service</i>) is a lightweight, robust and fast authenticated distributed publish/subscribe data service based on Rust (a safe, concurrent and fast systems language), Tokio (asynchronous networking for Rust) and Serde (serialization framework for Rust). It works seamlessly with IPv4 or IPv6 on TCP, which provides its reliable data transfer backbone on Rust supported platforms, including Linux, OSX and Windows.</p>
 
-<p>Mles is based on <i>Mles protocol</i> (IANA port# 8077) which has a lightweight header structure with SipHash based authentication. The reference server implementation is lock-free (no blocking!) and supports strong session authentication between Mles client and server. With its two layer authentication scheme (1st level: server-client, 2nd level: client-client) it provides possibility for clients to authenticate each others independently from servers and also to build any additional protocol over Mles they may need. </p>
+<h2>Why Mles?</h2>
 
-<p>Mles data structure is based on CBOR (Concise Binary Object Representation). It consists of (<i>uid, channel, message</i>) value triplet where <i>uid</i> and <i>channel</i> are UTF-8 strings and <i>message</i> can be of any type of payload.</p>
+<p>Mles provides a way to build a publish/subscribe service between clients which just need a channel to exchange messages on in a reliable manner. Every connection also identifies the channel which provides an easy way for clients to open and close connections without additional messaging: just connect and send, and when done, close the connection. With advanced connection handling on top of Tokio futures, Mles should scale well even with large amount of connections. Clients may choose their internal data format freely as it is transparent to Mles. Mles relies on a modern authentication mechanism which should perform well even with short inputs.</p>
 
-<p>Mles servers can be connected together by defining peer servers. This provides a simple but yet powerful way to distribute data between servers.</p>
+<h2>Mles overview</h2>
 
-<p>Mles example client provides also simple WebSocket proxy implementation which allows to use Mles without opening additional public ports, if that is not in some cases feasible.</p>
+<p>Mles is based on <i>Mles protocol</i> (IANA port# 8077) which has a 16 byte header + key structure with SipHash based authentication. The reference server implementation is fully safe Rust, lock-free (no blocking!) and supports strong session authentication between Mles client and server. With its two layer authentication scheme (1st level: server-client, 2nd level: client-client) it provides possibility for clients to authenticate each others independently from servers and also to build any additional protocol over Mles they may need. I.e. the clients may choose any data format they wish to exhange messages with each other on top of Mles protocol.</p>
 
-<p>For more information about Mles reference implementation, see <a href="https://github.com/jq-rs/mles-rs">https://github.com/jq-rs/mles-rs</a>.</p>
+<p>Mles data structure is based on CBOR (Concise Binary Object Representation). It consists of (<i>uid, channel, message</i>) value triplet where <i>uid</i> and <i>channel</i> are UTF-8 strings and <i>message</i> can be of any type of payload. This is the only mandatory message type that client should be aware of. Additional internal message types like "join" or "leave" messages that would be forwarded internally do not exist. Moreover, Mles protocol does not have any flags by design which simplifies the message handling itself. In practice, after the first frame is authenticated, Mles server just forwards next frames to all subscribers.</p>
+
+<p>Mles example client provides basic Tokio based client implementation and includes also a simple WebSocket proxy which allows to use Mles without opening additional public ports, if that is not in some cases feasible.</p>
+
+<p>Mles protocol and reference implementation are stable with v1.0 release. Please have a look at the API <a href="https://docs.rs/mles-utils/1.0.0/mles_utils/">here</a>. For more information about Mles reference implementation, see <a href="https://github.com/jq-rs/mles-rs">https://github.com/jq-rs/mles-rs</a> and the <a href="http://mles.io/blog">blog</a>.</p>
+
+<h2>Advanced features: Mles peers and message history</h2>
+
+<p>Mles servers may be connected together by defining peer servers. A peer is an Mles server that is configured to be connected to another server and where clients can connect to. A peer forwards all client messages to their peer server and back. The Mles server sees the peer connection as just another client. This provides a simple but yet powerful way to distribute data between servers. The server, peers and clients form a tree like structure to exhange messages.</p>
+
+<p>Mles servers and peers may also provide history information which provides a message history for new client connections. Compared to other protocols, Mles server does not try to hold a queue of messages and monitor the state of each individual message when has it reached all subscribers and can be removed from the queue. Instead, Mles server just resends the history available to lost and reconnected clients (which can be peers too). This makes the processing logic smooth and lightweight. The end result is that a client is guaranteed to receive all history information on the channel in case of connection loss, when the client is able to reconnect. The client is also able to compare has there been new messages on the channel while the connection was lost. Based on the message history, the client can also figure out are some of its own sent messages lost and do they need resending. Of course, not all clients need all these features which is one reason why Mles does not try to implement them for the clients.</p>
+
+<p>In addition to distribution, the peers provide a way to offer resilience with resynchronation message for the channel history information in case e.g. Mles root server restart. Clients may ignore this resynchronization. Still, an API is available for them to provide similar resynchronization for Mles servers, if needed.</p>
 
 <h2>Use cases</h2>
 
-<p>Often it is important that any data can be distributed in a scalable and properly authenticated but still reliable way. These services can take advantage using Mles as a backbone service. In a simple use case clients are connected directly to a public server. Another common use case is with more servers, one public server and several internal servers which peer the public server. Clients connect either to one of the internal servers or public server directly. Feel free to try any tree-like setup you need.</p>
+<p>Often it is important that any data can be distributed in a scalable and properly authenticated but still reliable way. These services can take advantage using Mles as a backbone service. In a simple use case a large amount of clients are connected directly to a public server on their chosen channel. Another common use case is with more servers, one public server and several peers. Clients may connect either to one of the peers or the public server directly. Any tree-like setup where you have one Mles server should work just fine.</p>
 
-<p>Services that could have benefit of the Mles could be e.g. configuration distribution or IoT telemetry. For a giant large scale services, such a data distribution service combined with a proper TCP offload engine (TOE) should provide a highly scalable service. In general any publish/subscribe type service without the need of database on the service itself can be seen as a fine candidate as an user.</p>
+<p>Services that could have benefit of the Mles could be e.g. configuration distribution or IoT telemetry. In general any publish/subscribe service without the need of database on the service itself can be seen as a fine candidate as an use case, especially if it has large amount of clients with limited amount of channels to subscribe. As the mechanism for joining a channel is always per connection and channels cannot be multiplexed on the same connection, Mles may not be the best choice for a client which needs to connect to a very large number of channels.</p>
+
+<h2>Design notes on client layer protocol</h2>
+
+<p>Implementing a light client for Mles is straightforward as the client only needs to know which kind of data structure to use between other clients. However, with history information enabled, client should expect duplication of already received messages in case of errors on the data path where Mles service is run. This should be taken into account while designing a client layer protocol. An easy way to identify retransmitted messages is to add a sequence number per user to the client layer protocol. Advanced clients could add this sequence number on 8 byte SipHash key-field, after the initial authentication is done. This sequence number can be then used to identify already received messages and ignore them when necessary. It is also good to notice, that even though Mles is ran on TCP which provides reliable streamed data service, it does not protect from data loss in case of data cuts. A client should be able to resynchronize to history and able to resend lost messages in case such reliability is needed.</p> 
 
 <h2>Future development</h2>
 
-<p>In the future reference implementation may be enhanced with performance and resiliency improvements. Other extensions may be considered too as long as they do not change the general principles of Mles.</p>
+<p>In the future reference implementation may be enhanced with performance and resiliency improvements. Other extensions may be considered too as long as they do not change the general principles of Mles.<p>
 
-<p>Changes to the Mles protocol itself are not allowed after 1.0 release as a simple protocol means lightweight, compatible and understandable service.</p>
+<p>And of course, different kind of client layer protocol implementations are welcome to be shared as examples, please send a note if you invent such!</p>
+
+<p>Changes to the Mles protocol itself are not allowed after 1.0 release as a simple protocol means lightweight, compatible and understandable service. It may be sent to standardization to guarantee this.</p>
 
 <p>On client side of course any new type of service can be introduced as a 2nd level service.</p>
 </div>
