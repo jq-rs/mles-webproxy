@@ -23,7 +23,8 @@
 
 <h2>Why Mles?</h2>
 
-<p>Mles provides a way to build a publish/subscribe service between clients which just need a channel to exchange messages on in a reliable manner. Every connection also identifies the channel which provides an easy way for clients to open and close connections without additional messaging: just connect and send, and when done, close the connection. With advanced connection handling on top of Tokio futures, Mles should scale well even with large amount of connections. Clients may choose their internal data format freely as it is transparent to Mles. Mles relies on a modern authentication mechanism which should perform well even with short inputs.</p>
+<p>Mles provides a way to build a publish/subscribe service between clients which just need a channel to exchange messages on in a reliable manner. Every connection also identifies the channel which provides an easy way for clients to open and close connections without additional messaging: just connect and send, and when done, close the connection. With advanced connection handling on top of Tokio futures, Mles should scale well even with large amount of connections. Clients may choose their internal data format freely as it is transparent to Mles. Mles relies on a modern authentication mechanism which should perform well even with short inputs. Due to the lightweight design, the performance of Mles should be an improvement compared to existing options.<br />
+<img src="images/simple_performance_comparison.png" alt="Simple performance comparison" hspace="20" vspace="20" /></p>
 
 <h2>Mles overview</h2>
 
@@ -33,7 +34,7 @@
 
 <p>Mles example client provides basic Tokio based client implementation and includes also a simple WebSocket proxy which allows to use Mles without opening additional public ports, if that is not in some cases feasible.</p>
 
-<p>Mles protocol and reference implementation are stable with v1.0 release. Please have a look at the API <a href="https://docs.rs/mles-utils/1.0.0/mles_utils/">here</a>. For more information about Mles reference implementation, see <a href="https://github.com/jq-rs/mles-rs">https://github.com/jq-rs/mles-rs</a> and the <a href="http://mles.io/blog">blog</a>.</p>
+<p>Mles protocol and reference implementation are stable with v1.0 release. Please have a look at the API <a href="https://docs.rs/mles-utils/1.0.0/mles_utils/">here</a>. For more information about Mles reference implementation, see <a href="https://github.com/jq-rs/mles-rs">https://github.com/jq-rs/mles-rs</a> and the <a href="http://mles.io/blog">blog</a> which has more details about the measured performance figures too.</p>
 
 <h2>Advanced features: Mles peers and message history</h2>
 
@@ -45,19 +46,25 @@
 
 <h2>Use cases</h2>
 
-<p>Often it is important that any data can be distributed in a scalable and properly authenticated but still reliable way. These services can take advantage using Mles as a backbone service. In a simple use case a large amount of clients are connected directly to a public server on their chosen channel. Another common use case is with more servers, one public server and several peers. Clients may connect either to one of the peers or the public server directly. Any tree-like setup where you have one Mles server should work just fine.</p>
+<p>Often it is important that any data can be distributed in a scalable and properly authenticated but still reliable way. These services can take advantage using Mles as a backbone service. In a simple use case a large amount of clients are connected directly to a public server on their chosen channel (see Fig. 1).<br />
+<img src="images/mles_usecase_with_clients_trans.png" alt="Mles use case with client" /><br /><b>Figure 1.</b> Mles use case with directly connected clients.<br />
+</p>
+<p>Another common use case is with more servers, one public server and several peers. Clients may connect either to one of the peers or the public server directly (see Fig. 2).<br /><img src="images/mles_usecase_with_peer_trans.png" alt="Mles use case with peer" />
+<br /><b>Figure 2.</b> Mles use case with a peer.<br />
+</p>
+<p>Any tree-like setup where you have one Mles server should work just fine.</p>
 
 <p>Services that could have benefit of the Mles could be e.g. configuration distribution or IoT telemetry. In general any publish/subscribe service without the need of database on the service itself can be seen as a fine candidate as an use case, especially if it has large amount of clients with limited amount of channels to subscribe. As the mechanism for joining a channel is always per connection and channels cannot be multiplexed on the same connection, Mles may not be the best choice for a client which needs to connect to a very large number of channels.</p>
 
-<h2>Design notes on client layer protocol</h2>
+<h3>Design notes on client layer protocol</h3>
 
-<p>Implementing a light client for Mles is straightforward as the client only needs to know which kind of data structure to use between other clients. However, with history information enabled, client should expect duplication of already received messages in case of errors on the data path where Mles service is run. This should be taken into account while designing a client layer protocol. An easy way to identify retransmitted messages is to add a sequence number per user to the client layer protocol. Advanced clients could add this sequence number on 8 byte SipHash key-field, after the initial authentication is done. This sequence number can be then used to identify already received messages and ignore them when necessary. It is also good to notice, that even though Mles is ran on TCP which provides reliable streamed data service, it does not protect from data loss in case of data cuts. A client should be able to resynchronize to history and able to resend lost messages in case such reliability is needed.</p> 
+<p>Implementing a light client for Mles is straightforward as the client only needs to know which kind of data structure to use between other clients. However, with history information enabled, client should expect duplication of already received messages in case of errors on the data path where Mles service is run. This should be taken into account while designing a client layer protocol. An easy way to identify retransmitted messages is to add a sequence number per user to the client layer protocol. Advanced clients could add this sequence number on 8 byte SipHash key-field, after the initial authentication is done. This sequence number can be then used to identify already received messages and ignore them when necessary. It is also good to notice, that even though Mles is ran on TCP which provides reliable streamed data service, it does not protect from data loss in case of forwarding path failure. A client should be able to resynchronize to history and able to resend lost messages in case such reliability is needed.</p> 
 
 <h2>Future development</h2>
 
 <p>In the future reference implementation may be enhanced with performance and resiliency improvements. Other extensions may be considered too as long as they do not change the general principles of Mles.<p>
 
-<p>And of course, different kind of client layer protocol implementations are welcome to be shared as examples, please send a note if you invent such!</p>
+<p>And of course, any kind of client layer protocol implementations are welcome to be shared as examples, please send a note or even PR (I am happy to be a reviewer for your own crate too) if you invent such!</p>
 
 <p>Changes to the Mles protocol itself are not allowed after 1.0 release as a simple protocol means lightweight, compatible and understandable service. It may be sent to standardization to guarantee this.</p>
 
