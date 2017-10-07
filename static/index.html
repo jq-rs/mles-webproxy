@@ -19,18 +19,21 @@
 <div>
 <img src="images/mles_logo_final.png" alt="Mles logo" width="100" />
 </div>
-<p><b>Mles</b> (<i>Modern Lightweight channEl Service</i>) is a lightweight, robust and fast authenticated distributed publish/subscribe data service based on Rust (a safe, concurrent and fast systems language), Tokio (asynchronous networking for Rust) and Serde (serialization framework for Rust). It works seamlessly with IPv4 or IPv6 on TCP, which provides its reliable data transfer backbone on Rust supported platforms, including Linux, OSX and Windows.</p>
+<p><b>Mles</b> (<i>Modern Lightweight channEl Service</i>) is a lightweight, robust and authenticated distributed publish/subscribe data service based on Rust (a safe, concurrent and fast systems language), Tokio (asynchronous networking for Rust) and Serde (serialization framework for Rust). It works seamlessly with IPv4 or IPv6 on TCP, which provides its reliable data transfer backbone on Rust supported platforms, including Linux, OSX and Windows.</p>
 
 <h2>Why Mles?</h2>
 
-<p>Mles provides a way to build a publish/subscribe service between clients which just need a channel to exchange messages on in a reliable manner. Every connection also identifies the channel which provides an easy way for clients to open and close connections without additional messaging: just connect and send, and when done, close the connection. With advanced connection handling on top of Tokio futures, Mles should scale well even with large amount of connections. Clients may choose their internal data format freely as it is transparent to Mles. Mles relies on a modern authentication mechanism which should perform well even with short inputs. Due to the lightweight design, the performance of Mles should be an improvement compared to existing options.<br />
-<img src="images/simple_performance_comparison.png" alt="Simple performance comparison" hspace="20" vspace="20" /></p>
+<p>Mles provides a way to build a publish/subscribe service between clients which just need a channel to exchange messages on in a reliable manner. Every connection also identifies the channel which provides an easy way for clients to open and close connections without additional messaging: just connect and send, and when done, close the connection. With advanced connection handling on top of Tokio futures, Mles should scale well even with large amount of connections. Clients may choose their internal data format freely as it is transparent to Mles. Mles relies on a modern authentication mechanism which should perform well even with short inputs. Due to the lightweight design, the performance of Mles should be an improvement compared to existing options (see Fig. 1).<br />
+<img src="images/simple_performance_comparison.png" alt="Simple performance comparison" vspace="20" /><br /><b>Figure 1.</b> Performance comparison between RabbitMQ and Mles.</p>
 
 <h2>Mles overview</h2>
 
 <p>Mles is based on <i>Mles protocol</i> (IANA port# 8077) which has a 16 byte header + key structure with SipHash based authentication. The reference server implementation is fully safe Rust, lock-free (no blocking!) and supports strong session authentication between Mles client and server. With its two layer authentication scheme (1st level: server-client, 2nd level: client-client) it provides possibility for clients to authenticate each others independently from servers and also to build any additional protocol over Mles they may need. I.e. the clients may choose any data format they wish to exhange messages with each other on top of Mles protocol.</p>
 
-<p>Mles data structure is based on CBOR (Concise Binary Object Representation). It consists of (<i>uid, channel, message</i>) value triplet where <i>uid</i> and <i>channel</i> are UTF-8 strings and <i>message</i> can be of any type of payload. This is the only mandatory message type that client should be aware of. Additional internal message types like "join" or "leave" messages that would be forwarded internally do not exist. Moreover, Mles protocol does not have any flags by design which simplifies the message handling itself. In practice, after the first frame is authenticated, Mles server just forwards next frames to all subscribers.</p>
+
+<p>Mles data structure is based on CBOR (Concise Binary Object Representation). It consists of (<i>uid, channel, message</i>) value triplet where <i>uid</i> and <i>channel</i> are UTF-8 strings and <i>message</i> can be of any type of payload with maximum size of 16.7 MB. This is the only mandatory message type that a client should be aware of. Additional internal message types like "join" or "leave" messages that would be forwarded internally do not exist. Moreover, Mles protocol does not have any flags by design which simplifies the message handling itself. In practice, after the first frame is authenticated, Mles server just forwards the next frames to all subscribers. Please see the Mles protocol header below:<br />
+<img src="images/mles_header_key.png" alt="Mles header key"  />
+</p>
 
 <p>Mles example client provides basic Tokio based client implementation and includes also a simple WebSocket proxy which allows to use Mles without opening additional public ports, if that is not in some cases feasible.</p>
 
@@ -46,29 +49,31 @@
 
 <h2>Use cases</h2>
 
-<p>Often it is important that any data can be distributed in a scalable and properly authenticated but still reliable way. These services can take advantage using Mles as a backbone service. In a simple use case a large amount of clients are connected directly to a public server on their chosen channel (see Fig. 1).<br />
-<img src="images/mles_usecase_with_clients_trans.png" alt="Mles use case with client" /><br /><b>Figure 1.</b> Mles use case with directly connected clients.<br />
+<p>Often it is important that any data can be distributed in a scalable and properly authenticated but still reliable way. These services can take advantage using Mles as a backbone service. In a simple use case a large amount of clients are connected directly to a public server on their chosen channel (see Fig. 2).<br /><br />
+<img src="images/mles_usecase_with_clients_trans.png" alt="Mles use case with client" /><br /><b>Figure 2.</b> Mles use case with directly connected clients.<br />
 </p>
-<p>Another common use case is with more servers, one public server and several peers. Clients may connect either to one of the peers or the public server directly (see Fig. 2).<br /><img src="images/mles_usecase_with_peer_trans.png" alt="Mles use case with peer" />
-<br /><b>Figure 2.</b> Mles use case with a peer.<br />
+<p>Another common use case is with more servers, one public server and several peers. Clients may connect either to one of the peers or the public server directly (see Fig. 3).<br /><br /><img src="images/mles_usecase_with_peer_trans.png" alt="Mles use case with peer" />
+<br /><b>Figure 3.</b> Mles use case with a peer.<br />
 </p>
 <p>Any tree-like setup where you have one Mles server should work just fine.</p>
 
 <p>Services that could have benefit of the Mles could be e.g. configuration distribution or IoT telemetry. In general any publish/subscribe service without the need of database on the service itself can be seen as a fine candidate as an use case, especially if it has large amount of clients with limited amount of channels to subscribe. As the mechanism for joining a channel is always per connection and channels cannot be multiplexed on the same connection, Mles may not be the best choice for a client which needs to connect to a very large number of channels.</p>
 
-<h3>Design notes on client layer protocol</h3>
+<h2>Design notes on client layer protocol</h2>
 
 <p>Implementing a light client for Mles is straightforward as the client only needs to know which kind of data structure to use between other clients. However, with history information enabled, client should expect duplication of already received messages in case of errors on the data path where Mles service is run. This should be taken into account while designing a client layer protocol. An easy way to identify retransmitted messages is to add a sequence number per user to the client layer protocol. Advanced clients could add this sequence number on 8 byte SipHash key-field, after the initial authentication is done. This sequence number can be then used to identify already received messages and ignore them when necessary. It is also good to notice, that even though Mles is ran on TCP which provides reliable streamed data service, it does not protect from data loss in case of forwarding path failure. A client should be able to resynchronize to history and able to resend lost messages in case such reliability is needed.</p> 
+
+<p>Clients may also have a need to know who have subscribed a channel. To have this information, clients may monitor it from initial frames which are send during connection attempt to channel: even though the first authenticated message would be empty, this empty message with <i>uid</i> and <i>channel</i> information is received by all connected clients. If channel depart information is needed, either an own depart messaging can be designed, or a keepalive mechanism can be introduced on top of client layer protocol.</p> 
 
 <h2>Future development</h2>
 
 <p>In the future reference implementation may be enhanced with performance and resiliency improvements. Other extensions may be considered too as long as they do not change the general principles of Mles.<p>
 
-<p>And of course, any kind of client layer protocol implementations are welcome to be shared as examples, please send a note or even PR (I am happy to be a reviewer for your own crate too) if you invent such!</p>
-
 <p>Changes to the Mles protocol itself are not allowed after 1.0 release as a simple protocol means lightweight, compatible and understandable service. It may be sent to standardization to guarantee this.</p>
 
-<p>On client side of course any new type of service can be introduced as a 2nd level service.</p>
+<p>On client side of course any new type of service can be introduced as a 2nd level service. New client layer protocol implementations are welcome to be shared as examples, please send a note or a PR (I am happy to be a reviewer for your own crate too) if you invent such!</p>
+
+</p>
 </div>
 </div>
 </body>
