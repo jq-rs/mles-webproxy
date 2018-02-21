@@ -31,9 +31,32 @@ fn service<S>(req: Request, mut e: Encoder<S>)
     if path == "/blog" {
         file = File::open("static/blog.html").unwrap();
     }
-    //else if path == "/images/mles_logo_final.png" {
-    //    file = File::open("static/images/mles_logo_final.png").unwrap();
-    //}
+    else if path == "/images/mles_logo_final.png" {
+        file = File::open("static/images/mles_logo_final.png").unwrap();
+        let mut buf_reader = BufReader::new(file);
+        let mut contents = Vec::new();
+        let res = buf_reader.read_to_end(&mut contents);
+        let sz = res.unwrap();
+
+        let arki = "Hello arkiruokaa!";
+
+        let host = req.host();
+        match host {
+            Some(host) => {
+            },
+            None => {}
+        }
+
+        e.status(Status::Ok);
+        e.add_length(sz as u64).unwrap();
+        e.add_header("Server",
+                     concat!("tk_http/", env!("CARGO_PKG_VERSION"))
+                    ).unwrap();
+        if e.done_headers().unwrap() {
+            e.write_body(&contents);
+        }
+        return ok(e.done());
+    }
     else {
         file = File::open("static/index.html").unwrap();
     }
