@@ -19,70 +19,65 @@ use tk_http::server::{Encoder, EncoderDone, Config, Proto, Error};
 use tk_listen::ListenExt;
 
 use std::fs::File;
-use std::io::BufReader;
+use std::collections::HashMap;
 use std::io::prelude::*;
 
 fn service<S>(req: Request, mut e: Encoder<S>)
     -> FutureResult<EncoderDone<S>, Error>
 {
     let path = req.path();
-    let file;
-
-    if path == "/blog" {
-        file = File::open("static/blog.html").unwrap();
-    }
-    else if path == "/images/mles_logo_final.png" {
-        file = File::open("static/images/mles_logo_final.png").unwrap();
-        let mut buf_reader = BufReader::new(file);
-        let mut contents = Vec::new();
-        let res = buf_reader.read_to_end(&mut contents);
-        let sz = res.unwrap();
-
-        let arki = "Hello arkiruokaa!";
-
-        let host = req.host();
-        match host {
-            Some(host) => {
-            },
-            None => {}
-        }
-
+    let mut file_map = HashMap::new();
+    let mut host = "mles.io";
+    if let Some(newhost) = req.host() {
+        host = newhost;
+    } 
+    if host == "40arkiruokaa.fi" {
+        let contents = host;
         e.status(Status::Ok);
-        e.add_length(sz as u64).unwrap();
+        e.add_length(contents.len() as u64).unwrap();
         e.add_header("Server",
                      concat!("tk_http/", env!("CARGO_PKG_VERSION"))
                     ).unwrap();
         if e.done_headers().unwrap() {
-            e.write_body(&contents);
+            e.write_body(contents.as_bytes());
         }
-        return ok(e.done());
     }
     else {
-        file = File::open("static/index.html").unwrap();
-    }
-    let mut buf_reader = BufReader::new(file);
-    let mut contents = String::new();
-    buf_reader.read_to_string(&mut contents).unwrap();
+        file_map.insert("/", "static/index.html");
+        file_map.insert("/blog", "static/blog.html");
+        file_map.insert("/images/simple_performance_comparison.png", "static/images/simple_performance_comparison.png");
+        file_map.insert("/images/mles_logo_final.png", "static/images/mles_logo_final.png");
+        file_map.insert("/images/mles_header_key.png", "static/images/mles_header_key.png");
+        file_map.insert("/images/mles_usecase_with_clients_trans.png", "static/images/mles_usecase_with_clients_trans.png");
+        file_map.insert("/images/mles_usecase_with_peer_trans.png", "static/images/mles_usecase_with_peer_trans.png");
 
-    let arki = "Hello arkiruokaa!";
-
-    let host = req.host();
-    match host {
-        Some(host) => {
-            if host == "40arkiruokaa.fi" {
-                contents = path.to_string();
+        match file_map.get(path) {
+            Some(filepath) => {
+                let mut contents = Vec::new();
+                let mut file = File::open(filepath).unwrap();
+                let res = file.read_to_end(&mut contents);
+                let sz = res.unwrap();
+                e.status(Status::Ok);
+                e.add_length(sz as u64).unwrap();
+                e.add_header("Server",
+                             concat!("tk_http/", env!("CARGO_PKG_VERSION"))
+                            ).unwrap();
+                if e.done_headers().unwrap() {
+                    e.write_body(&contents);
+                }
+            },
+            None => {
+                let contents = "404 error!";
+                e.status(Status::NotFound);
+                e.add_length(contents.len() as u64).unwrap();
+                e.add_header("Server",
+                             concat!("tk_http/", env!("CARGO_PKG_VERSION"))
+                            ).unwrap();
+                if e.done_headers().unwrap() {
+                    e.write_body(contents.as_bytes());
+                }
             }
-        },
-        None => {}
-    }
-
-    e.status(Status::Ok);
-    e.add_length(contents.len() as u64).unwrap();
-    e.add_header("Server",
-                 concat!("tk_http/", env!("CARGO_PKG_VERSION"))
-                ).unwrap();
-    if e.done_headers().unwrap() {
-        e.write_body(contents.as_bytes());
+        }
     }
     ok(e.done())
 }
