@@ -4,6 +4,8 @@ extern crate tk_bufstream;
 extern crate netbuf;
 extern crate tk_http;
 extern crate tk_listen;
+#[macro_use]
+extern crate lazy_static;
 
 use std::env;
 use std::time::Duration;
@@ -22,11 +24,25 @@ use std::fs::File;
 use std::collections::HashMap;
 use std::io::prelude::*;
 
+
+lazy_static! {
+    static ref FILE_MAP: HashMap<&'static str, &'static str> = {
+        let mut file_map = HashMap::new();
+        file_map.insert("/", "static/index.html");
+        file_map.insert("/blog", "static/blog.html");
+        file_map.insert("/images/simple_performance_comparison.png", "static/images/simple_performance_comparison.png");
+        file_map.insert("/images/mles_logo_final.png", "static/images/mles_logo_final.png");
+        file_map.insert("/images/mles_header_key.png", "static/images/mles_header_key.png");
+        file_map.insert("/images/mles_usecase_with_clients_trans.png", "static/images/mles_usecase_with_clients_trans.png");
+        file_map.insert("/images/mles_usecase_with_peer_trans.png", "static/images/mles_usecase_with_peer_trans.png");
+        file_map
+    };
+}
+
 fn service<S>(req: Request, mut e: Encoder<S>)
     -> FutureResult<EncoderDone<S>, Error>
 {
     let path = req.path();
-    let mut file_map = HashMap::new();
     let mut host = "mles.io";
     if let Some(newhost) = req.host() {
         host = newhost;
@@ -43,15 +59,7 @@ fn service<S>(req: Request, mut e: Encoder<S>)
         }
     }
     else {
-        file_map.insert("/", "static/index.html");
-        file_map.insert("/blog", "static/blog.html");
-        file_map.insert("/images/simple_performance_comparison.png", "static/images/simple_performance_comparison.png");
-        file_map.insert("/images/mles_logo_final.png", "static/images/mles_logo_final.png");
-        file_map.insert("/images/mles_header_key.png", "static/images/mles_header_key.png");
-        file_map.insert("/images/mles_usecase_with_clients_trans.png", "static/images/mles_usecase_with_clients_trans.png");
-        file_map.insert("/images/mles_usecase_with_peer_trans.png", "static/images/mles_usecase_with_peer_trans.png");
-
-        match file_map.get(path) {
+        match FILE_MAP.get(path) {
             Some(filepath) => {
                 let mut contents = Vec::new();
                 let mut file = File::open(filepath).unwrap();
