@@ -1,3 +1,4 @@
+#![feature(proc_macro)]
 extern crate tokio_core;
 extern crate futures;
 extern crate tk_bufstream;
@@ -6,6 +7,11 @@ extern crate tk_http;
 extern crate tk_listen;
 #[macro_use]
 extern crate lazy_static;
+extern crate rusqlite;
+
+extern crate tql;
+#[macro_use]
+extern crate tql_macros;
 
 use std::env;
 use std::time::Duration;
@@ -24,6 +30,21 @@ use std::fs::File;
 use std::collections::HashMap;
 use std::io::prelude::*;
 
+use rusqlite::Connection;
+use tql::PrimaryKey;
+use tql_macros::sql;
+
+fn get_connection() -> Connection {
+    Connection::open("arki.db").unwrap()
+}
+
+#[derive(SqlTable)]
+struct Ateria {
+    nimi: String,
+    ohje: String,
+    avainsanat: String,
+    lahde: String
+}
 
 lazy_static! {
     static ref FILE_MAP: HashMap<&'static str, &'static str> = {
@@ -48,7 +69,17 @@ fn service<S>(req: Request, mut e: Encoder<S>)
         host = newhost;
     } 
     if host == "40arkiruokaa.fi" {
-        let contents = host;
+        let mut contents = host.to_string();
+        contents.push_str("\n");
+        let connection = get_connection();
+        let items: Vec<Ateria> = sql!(connection, Ateria.all()).unwrap(); 
+        for item in items {
+            contents.push_str("\n");
+            contents.push_str(&item.nimi);
+            contents.push_str("\n");
+            contents.push_str(&item.ohje);
+            contents.push_str("\n");
+        }
         e.status(Status::Ok);
         e.add_length(contents.len() as u64).unwrap();
         e.add_header("Server",
@@ -95,8 +126,6 @@ fn main() {
     if env::var("RUST_LOG").is_err() {
         env::set_var("RUST_LOG", "info");
     }
-    //env_logger::init().expect("init logging");
-
     let mut lp = Core::new().unwrap();
 
     let addr = "0.0.0.0:80".parse().unwrap();
