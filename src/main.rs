@@ -46,6 +46,14 @@ struct Ateria {
     lahde: String
 }
 
+#[derive(SqlTable)]
+struct Aineslista {
+    ateria: String,
+    aines: String,
+    maara: f64,
+    mitta: Option<String>
+}
+
 lazy_static! {
     static ref FILE_MAP: HashMap<&'static str, &'static str> = {
         let mut file_map = HashMap::new();
@@ -69,24 +77,57 @@ fn service<S>(req: Request, mut e: Encoder<S>)
         host = newhost;
     } 
     if host == "40arkiruokaa.fi" {
-        let mut contents = host.to_string();
-        contents.push_str("\n");
+        let mut header = Vec::new();
+        let mut file = File::open("static/arkiheader.html").unwrap();
+        let _res = file.read_to_end(&mut header);
+        let mut contents = String::new();
+        contents.push_str("<h2>");
+        contents.push_str(&host.to_string());
+        contents.push_str("</h2>");
         let connection = get_connection();
-        let items: Vec<Ateria> = sql!(connection, Ateria.all()).unwrap(); 
-        for item in items {
-            contents.push_str("\n");
-            contents.push_str(&item.nimi);
-            contents.push_str("\n");
-            contents.push_str(&item.ohje);
-            contents.push_str("\n");
+        let ateriat: Vec<Ateria> = sql!(connection, Ateria.all()).unwrap(); 
+        for ateria in ateriat {
+            contents.push_str("<h3>");
+            contents.push_str(&ateria.nimi);
+            contents.push_str("</h3>");
+            contents.push_str("<p>");
+            contents.push_str(&ateria.ohje);
+            contents.push_str("</p>");
+            let ainekset: Vec<Aineslista> = sql!(connection, Aineslista.filter(ateria == ateria.nimi)).unwrap(); 
+            contents.push_str("<h4>");
+            contents.push_str("Ainekset:");
+            contents.push_str("</h4>");
+            contents.push_str("<ul>");
+            for aines in ainekset {
+                contents.push_str("<li>");
+                contents.push_str(&aines.aines);
+                contents.push_str(" ");
+                contents.push_str(&aines.maara.to_string());
+                contents.push_str(" ");
+                match aines.mitta {
+                    Some(mitta) => {
+                        contents.push_str(&mitta);
+                    }
+                    None => {}
+                }
+                contents.push_str("</li>");
+            }
+            contents.push_str("</ul>");
         }
+        let mut footer = Vec::new();
+        let mut file = File::open("static/arkifooter.html").unwrap();
+        let _res = file.read_to_end(&mut footer);
+
+        header.extend(contents.as_bytes());
+        header.extend(footer);
+
         e.status(Status::Ok);
-        e.add_length(contents.len() as u64).unwrap();
+        e.add_length(header.len() as u64).unwrap();
         e.add_header("Server",
                      concat!("tk_http/", env!("CARGO_PKG_VERSION"))
                     ).unwrap();
         if e.done_headers().unwrap() {
-            e.write_body(contents.as_bytes());
+            e.write_body(&header);
         }
     }
     else {
