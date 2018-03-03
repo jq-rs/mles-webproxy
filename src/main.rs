@@ -182,50 +182,72 @@ fn service<S>(req: Request, mut e: Encoder<S>)
             contents.push_str("</p>");
             contents.push_str("<hr />");
         }
-        contents.push_str("<h4>");
+        contents.push_str("<h3>");
         contents.push_str("Kauppalista");
-        contents.push_str("</h4>");
-        contents.push_str("<ul>");
+        contents.push_str("</h3>");
+
+        let mut tyyppilista: HashMap<String, Vec<(String, f64, String)>> = HashMap::new();
+
         for (aines, (maara, mitta)) in kauppalista {
-            contents.push_str("<li>");
-            contents.push_str(&maara.to_string());
-            contents.push_str(" ");
-            if maara > 1.0 {
-                let aineslista: Vec<Ainesmitta> = sql!(connection, Ainesmitta.filter(mitta == mitta)).unwrap(); 
-                for ainesmitta in aineslista {
-                    match ainesmitta.monikko {
-                        Some(monikko) => {
-                            contents.push_str(&monikko);
-                        },
-                        None => {
-                            contents.push_str(&mitta);
-                        }
-                    }
+            let mut ainest: Vec<Aines> = sql!(connection, Aines.filter(nimi == aines)).unwrap(); 
+            if ainest.len() == 1 {
+                let ainest = ainest.pop().unwrap();
+                if tyyppilista.contains_key(&ainest.ainestyyppi) {
+                    let mut tyyppi = tyyppilista.get_mut(&ainest.ainestyyppi).unwrap();
+                    tyyppi.push((aines, maara, mitta));
+                }
+                else {
+                    tyyppilista.insert(ainest.ainestyyppi, vec![(aines, maara, mitta)]);
                 }
             }
-            else {
-                contents.push_str(&mitta);
-            }
-            contents.push_str(" ");
-            if maara > 1.0 {
-                let ainesl: Vec<Aines> = sql!(connection, Aines.filter(nimi == aines)).unwrap(); 
-                for ainesm in ainesl {
-                    match ainesm.monikko {
-                        Some(monikko) => {
-                            contents.push_str(&monikko);
-                        },
-                        None => {
-                            contents.push_str(&aines);
-                        }
-                    }
-                }
-            }
-            else {
-                contents.push_str(&aines);
-            }
-            contents.push_str("</li>");
         }
-        contents.push_str("</ul>");
+
+        for (tyyppi, ainesv) in tyyppilista {
+            contents.push_str("<h4>");
+            contents.push_str(&tyyppi);
+            contents.push_str("</h4>");
+            contents.push_str("<ul>");
+            for (aines, maara, mitta) in ainesv {
+                contents.push_str("<li>");
+                contents.push_str(&maara.to_string());
+                contents.push_str(" ");
+                if maara > 1.0 {
+                    let aineslista: Vec<Ainesmitta> = sql!(connection, Ainesmitta.filter(mitta == mitta)).unwrap(); 
+                    for ainesmitta in aineslista {
+                        match ainesmitta.monikko {
+                            Some(monikko) => {
+                                contents.push_str(&monikko);
+                            },
+                            None => {
+                                contents.push_str(&mitta);
+                            }
+                        }
+                    }
+                }
+                else {
+                    contents.push_str(&mitta);
+                }
+                contents.push_str(" ");
+                if maara > 1.0 {
+                    let ainesl: Vec<Aines> = sql!(connection, Aines.filter(nimi == aines)).unwrap(); 
+                    for ainesm in ainesl {
+                        match ainesm.monikko {
+                            Some(monikko) => {
+                                contents.push_str(&monikko);
+                            },
+                            None => {
+                                contents.push_str(&aines);
+                            }
+                        }
+                    }
+                }
+                else {
+                    contents.push_str(&aines);
+                }
+                contents.push_str("</li>");
+            }
+            contents.push_str("</ul>");
+        }
 
         let mut footer = Vec::new();
         let mut file = File::open("static/arkifooter.html").unwrap();
