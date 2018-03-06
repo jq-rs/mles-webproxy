@@ -8,6 +8,7 @@ extern crate tk_listen;
 #[macro_use]
 extern crate lazy_static;
 extern crate rusqlite;
+extern crate fnv;
 
 extern crate tql;
 #[macro_use]
@@ -33,6 +34,7 @@ use std::io::prelude::*;
 use rusqlite::Connection;
 use tql::PrimaryKey;
 use tql_macros::sql;
+use fnv::FnvHashMap;
 
 fn get_connection() -> Connection {
     Connection::open("arki.db").unwrap()
@@ -91,7 +93,7 @@ fn service<S>(req: Request, mut e: Encoder<S>)
     } 
     if host == "40arkiruokaa.fi" {
         let mut header = Vec::new();
-        let mut kauppalista: HashMap<String, (f64, String)> = HashMap::new();
+        let mut kauppalista: FnvHashMap<String, (f64, String)> = FnvHashMap::default();
         let mut file = File::open("static/arkiheader.html").unwrap();
 
         let _res = file.read_to_end(&mut header);
@@ -186,7 +188,7 @@ fn service<S>(req: Request, mut e: Encoder<S>)
         contents.push_str("Kauppalista");
         contents.push_str("</h3>");
 
-        let mut tyyppilista: HashMap<String, Vec<(String, f64, String)>> = HashMap::new();
+        let mut tyyppilista: FnvHashMap<String, Vec<(String, f64, String)>> = FnvHashMap::default();
 
         for (aines, (maara, mitta)) in kauppalista {
             let mut ainest: Vec<Aines> = sql!(connection, Aines.filter(nimi == aines)).unwrap(); 
