@@ -28,7 +28,6 @@ use tk_http::server::{Encoder, EncoderDone, Config, Proto, Error};
 use tk_listen::ListenExt;
 
 use std::fs::File;
-use std::collections::HashMap;
 use std::io::prelude::*;
 
 use rusqlite::Connection;
@@ -70,8 +69,8 @@ struct Ainesmitta {
 }
 
 lazy_static! {
-    static ref FILE_MAP: HashMap<&'static str, &'static str> = {
-        let mut file_map = HashMap::new();
+    static ref FILE_MAP: FnvHashMap<&'static str, &'static str> = {
+        let mut file_map = FnvHashMap::default();
         file_map.insert("/", "static/index.html");
         file_map.insert("/blog", "static/blog.html");
         file_map.insert("/images/simple_performance_comparison.png", "static/images/simple_performance_comparison.png");
@@ -101,6 +100,7 @@ fn service<S>(req: Request, mut e: Encoder<S>)
         contents.push_str("<h2>");
         contents.push_str(&host.to_string());
         contents.push_str("</h2>");
+        contents.push_str("<p>Neljäkymmentä arkiruokaa, joissa on ripaus gourmeta! 10 % ohjeista lisätty tällä hetkellä.</p><p>Muista luomu aina kun mahdollista. Voit korvata halutessasi kaikki liha ja kala-ateriat kasviproteiineilla, katso vinkit ohjeiden lopusta.</p>");
 
         let connection = get_connection();
 
