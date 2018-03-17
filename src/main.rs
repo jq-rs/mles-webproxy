@@ -14,26 +14,30 @@ extern crate tql;
 #[macro_use]
 extern crate tql_macros;
 
-use std::env;
-use std::time::Duration;
-
-use tokio_core::reactor::Core;
+use tokio_core::reactor::{Core};
 use tokio_core::net::{TcpListener};
-use futures::{Stream, Future};
+use futures::{Stream, Future, Sink};
 use futures::future::{FutureResult, ok};
+use futures::sync::mpsc::{unbounded, UnboundedSender};
 
 use tk_http::{Status};
 use tk_http::server::buffered::{Request, BufferedDispatcher};
 use tk_http::server::{Encoder, EncoderDone, Config, Proto, Error};
+use tk_http::websocket::{Loop, Config as WebsockConfig, Dispatcher, Frame};
+use tk_http::websocket::{Error as WsErr};
+use tk_http::websocket::Packet::{self};
 use tk_listen::ListenExt;
 
 use std::fs::File;
 use std::io::prelude::*;
+use std::time::Duration;
 
 use rusqlite::Connection;
 use tql::PrimaryKey;
 use tql_macros::sql;
 use fnv::FnvHashMap;
+        
+const ACCEPTED_PROTOCOL: &str = "mles-websocket";
 
 fn get_connection() -> Connection {
     Connection::open("arki.db").unwrap()
@@ -90,6 +94,32 @@ fn service<S>(req: Request, mut e: Encoder<S>)
     if let Some(newhost) = req.host() {
         host = newhost;
     } 
+
+    /* WebSocket upgrade handling */
+    if let Some(ws) = req.websocket_handshake() {
+        /* Check if ws protocol is correct */
+        let protocols = &ws.protocols;
+        for protocol in protocols {
+            if protocol == ACCEPTED_PROTOCOL {
+                e.status(Status::SwitchingProtocol);
+                e.add_header("Connection", "upgrade").unwrap();
+                e.add_header("Upgrade", "websocket").unwrap();
+                e.format_header("Sec-Websocket-Accept", &ws.accept).unwrap();
+                e.add_header("Sec-Websocket-Protocol", ACCEPTED_PROTOCOL).unwrap();
+                e.done_headers().unwrap();
+                return ok(e.done());
+            }
+        }
+        let contents = "404 error!";
+        e.status(Status::NotFound);
+        e.add_length(contents.len() as u64).unwrap();
+        if e.done_headers().unwrap() {
+            e.write_body(contents.as_bytes());
+        }
+        /* TODO: return error here */
+        return ok(e.done());
+    }
+
     if host == "40arkiruokaa.fi" {
         let mut header = Vec::new();
         let mut kauppalista: FnvHashMap<String, (f64, String)> = FnvHashMap::default();
@@ -260,9 +290,6 @@ fn service<S>(req: Request, mut e: Encoder<S>)
 
         e.status(Status::Ok);
         e.add_length(header.len() as u64).unwrap();
-        e.add_header("Server",
-                     concat!("tk_http/", env!("CARGO_PKG_VERSION"))
-                    ).unwrap();
         if e.done_headers().unwrap() {
             e.write_body(&header);
         }
@@ -276,9 +303,6 @@ fn service<S>(req: Request, mut e: Encoder<S>)
                 let sz = res.unwrap();
                 e.status(Status::Ok);
                 e.add_length(sz as u64).unwrap();
-                e.add_header("Server",
-                             concat!("tk_http/", env!("CARGO_PKG_VERSION"))
-                            ).unwrap();
                 if e.done_headers().unwrap() {
                     e.write_body(&contents);
                 }
@@ -287,9 +311,6 @@ fn service<S>(req: Request, mut e: Encoder<S>)
                 let contents = "404 error!";
                 e.status(Status::NotFound);
                 e.add_length(contents.len() as u64).unwrap();
-                e.add_header("Server",
-                             concat!("tk_http/", env!("CARGO_PKG_VERSION"))
-                            ).unwrap();
                 if e.done_headers().unwrap() {
                     e.write_body(contents.as_bytes());
                 }
@@ -299,158 +320,46 @@ fn service<S>(req: Request, mut e: Encoder<S>)
     ok(e.done())
 }
 
+struct MlesProxy(UnboundedSender<Packet>);
+
+/* TODO: Add proper bindings to MlesProxy */
+impl Dispatcher for MlesProxy {
+    type Future = FutureResult<(), WsErr>;
+    fn frame(&mut self, frame: &Frame) -> FutureResult<(), WsErr> {
+        println!("Received frame: {:?}. Echoing...", frame);
+        self.0.start_send(frame.into()).unwrap();
+        ok(())
+    }
+}
 
 fn main() {
-    if env::var("RUST_LOG").is_err() {
-        env::set_var("RUST_LOG", "info");
-    }
     let mut lp = Core::new().unwrap();
+    let h1 = lp.handle();
 
     let addr = "0.0.0.0:80".parse().unwrap();
     let listener = TcpListener::bind(&addr, &lp.handle()).unwrap();
     let cfg = Config::new().done();
-    let h1 = lp.handle();
+    let wcfg = WebsockConfig::new().done();
 
     let done = listener.incoming()
         .sleep_on_error(Duration::from_millis(100), &lp.handle())
         .map(move |(socket, addr)| {
+            let wcfg = wcfg.clone();
+            let h2 = h1.clone();
             Proto::new(socket, &cfg,
-                       BufferedDispatcher::new(addr, &h1, || service),
-                       &h1)
+                       BufferedDispatcher::new_with_websockets(addr, &h1,
+                                                               service,
+                                                               move |out, inp| {
+                                                                   let (tx, rx) = unbounded();
+                                                                   let rx = rx.map_err(|_| format!("stream closed"));
+                                                                   Loop::server(out, inp, rx, MlesProxy(tx), &wcfg, &h2)
+                                                                       .map_err(|e| println!("websocket closed: {}", e))
+                                                               }),
+                                                               &h1)
                 .map_err(|e| { println!("Connection error: {}", e); })
+                .then(|_| Ok(())) // don't fail, please
         })
     .listen(1000);
 
     lp.run(done).unwrap();
 }
-
-/*
-#![feature(proc_macro)]
-
-#![feature(plugin, decl_macro)]
-#![plugin(rocket_codegen)]
-
-extern crate rocket;
-
-use std::io;
-use std::path::{Path, PathBuf};
-
-use rocket::response::NamedFile;
-
-extern crate chrono;
-//extern crate libsqlite3_sys;
-extern crate rusqlite;
-
-extern crate tql;
-#[macro_use]
-extern crate tql_macros;
-//extern crate iron;
-//extern crate staticfile;
-//extern crate mount;
-/*use iron::prelude::*;
-use iron::status;
-use iron::request::Request;
-use iron::headers::Host;
-use iron::headers::ContentType;
-use iron::modifiers::Header;
-use iron::mime::{Mime, TopLevel, SubLevel};*/
-
-//use std::path::Path;
-
-//use iron::Iron;
-//use staticfile::Static;
-//use mount::Mount;
-use rusqlite::Connection;
-use chrono::DateTime;
-use chrono::offset::Utc;
-use tql::PrimaryKey;
-use tql_macros::sql;
-use std:fs::File;
-
-fn get_connection() -> Connection {
-        Connection::open("arki.db").unwrap()
-}
-
-#[derive(SqlTable)]
-struct Model {
-    id: PrimaryKey,
-    text: String,
-    date_added: DateTime<Utc>,
-}
-
-#[get("/")]
-fn index() -> io::Result<NamedFile> {
-        NamedFile::open("static/index.html")
-}
-
-#[get("/blog")]
-fn blog() -> io::Result<NamedFile> {
-        NamedFile::open("static/blog.html")
-}
-
-#[get("/<file..>")]
-fn files(file: PathBuf) -> Option<NamedFile> {
-        NamedFile::open(Path::new("static/").join(file)).ok()
-}
-
-fn rocket() -> rocket::Rocket {
-        rocket::ignite().mount("/", routes![index, files, blog])
-}
-
-fn main() {
-        rocket().launch();
-}
-*/
-/*
-fn main() {
-	let mut mount = Mount::new();
-	mount.mount("/", Static::new(Path::new("static/index.html")));
-	mount.mount("/silence.ogg", Static::new(Path::new("static/silence.ogg")));
-	mount.mount("/images", Static::new(Path::new("static/images/")));
-	mount.mount("/blog", Static::new(Path::new("static/blog.html")));
-
-        let connection = get_connection();
-
-        //let _ = sql!(connection, Model.create());
-
-        //let text = "text1".to_string();
-        //let id = sql!(connection, Model.insert(text = text, date_added =
-                                  //             Utc::now())).unwrap();
-        //println!("id {}", id);
-        //let text = "text2".to_string();
-        //let id = sql!(connection, Model.insert(text = text, date_added =
-                                    //           Utc::now())).unwrap();
-        //let text = "text3".to_string();
-        //let id = sql!(connection, Model.insert(text = text, date_added =
-                                      //         Utc::now())).unwrap();
-
-        // Update a row.
-        //let result = sql!(connection, Model.get(id).update(text = "new-text"));
-        //println!("Result {}", result.unwrap());
-
-        // Delete a row.
-        //let result = sql!(connection, Model.get(id).delete());
-        //println!("Result {}", result.unwrap());
-
-        // Query some rows from the table:
-        // get the last 10 rows sorted by date_added descending.
-        //let items = sql!(connection, Model.sort(-date_added)[..10]); 
-        //for item in items {
-        //    println!("Item {:?}", item);
-       // }
-       let mut chain = Chain::new(mount);
-    Iron::new(|request: &mut Request| {
-        if request.headers.has::<Host>() {
-            if let Some(host) = request.headers.get::<Host>() {
-                if host.hostname == "40arkiruokaa.fi".to_string() ||
-                    host.hostname == "www.40arkiruokaa.fi".to_string() {
-                        return Ok(Response::with((status::Ok, "40arkiruokaa.fi")));
-                    }
-            }
-        } 
-        let file = File::open(Path::new("static/index.html")).unwrap();
-        let content_type = Header(ContentType(Mime(TopLevel::Text, SubLevel::Html, vec![])));
-        Ok(Response::with((status::Ok, file, content_type)))
-    }).chain.http("0.0.0.0:80").unwrap();
-}
-*/
