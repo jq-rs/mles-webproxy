@@ -1,11 +1,11 @@
 #!/bin/sh 
 
 start() {
-  exec sudo /home/ubuntu/www/arki-server/target/release/arki-server 
+  exec /home/ubuntu/www/arki-server/target/release/arki-server 
 }
 
 stop() {
-  exec sudo killall arki-server  
+  exec killall arki-server  
 }
 
 case $1 in

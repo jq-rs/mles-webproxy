@@ -7,6 +7,7 @@ authors = ["jq-rs"]
 tql = { git = "https://github.com/antoyo/tql", features = ["sqlite"] }
 tql_macros = { git = "https://github.com/antoyo/tql" }
 tokio = "0.1"
+tokio-io = "0.1"
 tokio-core = "0.1"
 futures = "0.1"
 tk-bufstream = "0.3"
@@ -16,3 +17,5 @@ tk-listen = "0.1"
 lazy_static = "1.0"
 rusqlite = "0.13"
 fnv = "1.0.0"
+mles-utils = { path = "../../mles/mles-rs/mles-utils" }
+bytes = "0.4"
