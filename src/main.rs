@@ -91,6 +91,8 @@ lazy_static! {
         let mut file_map = FnvHashMap::default();
         file_map.insert("/", "static/index.html");
         file_map.insert("/blog", "static/blog.html");
+        file_map.insert("/legal", "static/legal.html");
+        file_map.insert("/app", "static/app.html");
         file_map.insert("/images/simple_performance_comparison.png", "static/images/simple_performance_comparison.png");
         file_map.insert("/images/mles_logo_final.png", "static/images/mles_logo_final.png");
         file_map.insert("/images/mles_header_key.png", "static/images/mles_header_key.png");
