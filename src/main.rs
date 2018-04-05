@@ -138,164 +138,11 @@ fn service<S>(req: Request, mut e: Encoder<S>)
 
     if host == "40arkiruokaa.fi" {
         let mut header = Vec::new();
-        let mut kauppalista: FnvHashMap<String, (f64, String)> = FnvHashMap::default();
         let mut file = File::open("static/arkiheader.html").unwrap();
 
         let _res = file.read_to_end(&mut header);
-        let mut contents = String::new();
-        contents.push_str("<h2>");
-        contents.push_str(&host.to_string());
-        contents.push_str("</h2>");
-        contents.push_str("<p>Neljäkymmentä arkiruokaa, joissa on ripaus gourmeta! 10 % ohjeista lisätty tällä hetkellä.</p><p>Muista luomu aina kun mahdollista. Voit korvata halutessasi kaikki liha ja kala-ateriat kasviproteiineilla, katso vinkit ohjeiden lopusta.</p>");
 
-        let connection = get_connection();
-
-
-        let ateriat: Vec<Ateria> = sql!(connection, Ateria.all()).unwrap(); 
-        for ateria in ateriat {
-            contents.push_str("<h3>");
-            contents.push_str(&ateria.nimi);
-            contents.push_str("</h3>");
-            let ainekset: Vec<Aineslista> = sql!(connection, Aineslista.filter(ateria == ateria.nimi)).unwrap(); 
-            contents.push_str("<h4>");
-            contents.push_str("Ainekset:");
-            contents.push_str("</h4>");
-            contents.push_str("<ul>");
-            for aines in ainekset {
-                contents.push_str("<li>");
-
-                contents.push_str(&aines.maara.to_string());
-                contents.push_str(" ");
-                let mitta = aines.mitta.clone();
-                match mitta {
-                    Some(mitta) => {
-                        let kaines = aines.aines.clone();
-                        let mut kmaaramitta = kauppalista.entry(kaines).or_insert((0.0, "".to_string()));
-                        let & mut (ref mut kmaara, ref mut kmitta) = & mut *kmaaramitta;
-                        *kmaara += aines.maara.clone();
-                        *kmitta = mitta.clone();
-                        if aines.maara > 1.0 {
-                            let aineslista: Vec<Ainesmitta> = sql!(connection, Ainesmitta.filter(mitta == mitta)).unwrap(); 
-                            for ainesmitta in aineslista {
-                                match ainesmitta.monikko {
-                                    Some(monikko) => {
-                                        contents.push_str(&monikko);
-                                    },
-                                    None => {
-                                        contents.push_str(&mitta);
-                                    }
-                                }
-                            }
-                        }
-                        else {
-                            contents.push_str(&mitta);
-                        }
-                    },
-                    None => {
-                        let kaines = aines.aines.clone();
-                        let mut kmaaramitta = kauppalista.entry(kaines).or_insert((0.0, "".to_string()));
-                        let & mut (ref mut kmaara, _) = & mut *kmaaramitta;
-                        *kmaara += aines.maara.clone();
-                    }
-                }
-                contents.push_str(" ");
-                
-                if aines.maara > 1.0 {
-                    let ainesl: Vec<Aines> = sql!(connection, Aines.filter(nimi == aines.aines)).unwrap(); 
-                    for ainesm in ainesl {
-                        match ainesm.monikko {
-                            Some(monikko) => {
-                                contents.push_str(&monikko);
-                            },
-                            None => {
-                                contents.push_str(&aines.aines);
-                            }
-                        }
-                    }
-                }
-                else {
-                    contents.push_str(&aines.aines);
-                }
-                contents.push_str(" ");
-                contents.push_str("</li>");
-            }
-            contents.push_str("</ul>");
-            contents.push_str("<p>");
-            match ateria.ohje {
-                Some(ohje) => {
-                    contents.push_str(&ohje);
-                },
-                None => {}
-            }
-            contents.push_str("</p>");
-            contents.push_str("<hr />");
-        }
-        contents.push_str("<h3>");
-        contents.push_str("Kauppalista");
-        contents.push_str("</h3>");
-
-        let mut tyyppilista: FnvHashMap<String, Vec<(String, f64, String)>> = FnvHashMap::default();
-
-        for (aines, (maara, mitta)) in kauppalista {
-            let mut ainest: Vec<Aines> = sql!(connection, Aines.filter(nimi == aines)).unwrap(); 
-            if ainest.len() == 1 {
-                let ainest = ainest.pop().unwrap();
-                if tyyppilista.contains_key(&ainest.ainestyyppi) {
-                    let mut tyyppi = tyyppilista.get_mut(&ainest.ainestyyppi).unwrap();
-                    tyyppi.push((aines, maara, mitta));
-                }
-                else {
-                    tyyppilista.insert(ainest.ainestyyppi, vec![(aines, maara, mitta)]);
-                }
-            }
-        }
-
-        for (tyyppi, ainesv) in tyyppilista {
-            contents.push_str("<h4>");
-            contents.push_str(&tyyppi);
-            contents.push_str("</h4>");
-            contents.push_str("<ul>");
-            for (aines, maara, mitta) in ainesv {
-                contents.push_str("<li>");
-                contents.push_str(&maara.to_string());
-                contents.push_str(" ");
-                if maara > 1.0 {
-                    let aineslista: Vec<Ainesmitta> = sql!(connection, Ainesmitta.filter(mitta == mitta)).unwrap(); 
-                    for ainesmitta in aineslista {
-                        match ainesmitta.monikko {
-                            Some(monikko) => {
-                                contents.push_str(&monikko);
-                            },
-                            None => {
-                                contents.push_str(&mitta);
-                            }
-                        }
-                    }
-                }
-                else {
-                    contents.push_str(&mitta);
-                }
-                contents.push_str(" ");
-                if maara > 1.0 {
-                    let ainesl: Vec<Aines> = sql!(connection, Aines.filter(nimi == aines)).unwrap(); 
-                    for ainesm in ainesl {
-                        match ainesm.monikko {
-                            Some(monikko) => {
-                                contents.push_str(&monikko);
-                            },
-                            None => {
-                                contents.push_str(&aines);
-                            }
-                        }
-                    }
-                }
-                else {
-                    contents.push_str(&aines);
-                }
-                contents.push_str("</li>");
-            }
-            contents.push_str("</ul>");
-        }
+        let contents = handle_40arkiruokaa();
 
         let mut footer = Vec::new();
         let mut file = File::open("static/arkifooter.html").unwrap();
@@ -526,3 +373,163 @@ impl TokioEncoder for Bytes {
         Ok(())
     }
 }
+
+fn handle_40arkiruokaa()-> String {
+    let mut contents = String::new();
+    let mut kauppalista: FnvHashMap<String, (f64, String)> = FnvHashMap::default();
+    contents.push_str("<h2>");
+    contents.push_str("40arkiruokaa.fi");
+    contents.push_str("</h2>");
+    contents.push_str("<p>Neljäkymmentä arkiruokaa, joissa on ripaus gourmeta! 10 % ohjeista lisätty tällä hetkellä.</p><p>Muista luomu aina kun mahdollista. Voit korvata halutessasi kaikki liha ja kala-ateriat kasviproteiineilla, katso vinkit ohjeiden lopusta.</p>");
+
+    let connection = get_connection();
+
+
+    let ateriat: Vec<Ateria> = sql!(connection, Ateria.all()).unwrap(); 
+    for ateria in ateriat {
+        contents.push_str("<h3>");
+        contents.push_str(&ateria.nimi);
+        contents.push_str("</h3>");
+        let ainekset: Vec<Aineslista> = sql!(connection, Aineslista.filter(ateria == ateria.nimi)).unwrap(); 
+        contents.push_str("<h4>");
+        contents.push_str("Ainekset:");
+        contents.push_str("</h4>");
+        contents.push_str("<ul>");
+        for aines in ainekset {
+            contents.push_str("<li>");
+
+            contents.push_str(&aines.maara.to_string());
+            contents.push_str(" ");
+            let mitta = aines.mitta.clone();
+            match mitta {
+                Some(mitta) => {
+                    let kaines = aines.aines.clone();
+                    let mut kmaaramitta = kauppalista.entry(kaines).or_insert((0.0, "".to_string()));
+                    let & mut (ref mut kmaara, ref mut kmitta) = & mut *kmaaramitta;
+                    *kmaara += aines.maara.clone();
+                    *kmitta = mitta.clone();
+                    if aines.maara > 1.0 {
+                        let aineslista: Vec<Ainesmitta> = sql!(connection, Ainesmitta.filter(mitta == mitta)).unwrap(); 
+                        for ainesmitta in aineslista {
+                            match ainesmitta.monikko {
+                                Some(monikko) => {
+                                    contents.push_str(&monikko);
+                                },
+                                None => {
+                                    contents.push_str(&mitta);
+                                }
+                            }
+                        }
+                    }
+                    else {
+                        contents.push_str(&mitta);
+                    }
+                },
+                None => {
+                    let kaines = aines.aines.clone();
+                    let mut kmaaramitta = kauppalista.entry(kaines).or_insert((0.0, "".to_string()));
+                    let & mut (ref mut kmaara, _) = & mut *kmaaramitta;
+                    *kmaara += aines.maara.clone();
+                }
+            }
+            contents.push_str(" ");
+
+            if aines.maara > 1.0 {
+                let ainesl: Vec<Aines> = sql!(connection, Aines.filter(nimi == aines.aines)).unwrap(); 
+                for ainesm in ainesl {
+                    match ainesm.monikko {
+                        Some(monikko) => {
+                            contents.push_str(&monikko);
+                        },
+                        None => {
+                            contents.push_str(&aines.aines);
+                        }
+                    }
+                }
+            }
+            else {
+                contents.push_str(&aines.aines);
+            }
+            contents.push_str(" ");
+            contents.push_str("</li>");
+        }
+        contents.push_str("</ul>");
+        contents.push_str("<p>");
+        match ateria.ohje {
+            Some(ohje) => {
+                contents.push_str(&ohje);
+            },
+            None => {}
+        }
+        contents.push_str("</p>");
+        contents.push_str("<hr />");
+    }
+    contents.push_str("<h3>");
+    contents.push_str("Kauppalista");
+    contents.push_str("</h3>");
+
+    let mut tyyppilista: FnvHashMap<String, Vec<(String, f64, String)>> = FnvHashMap::default();
+
+    for (aines, (maara, mitta)) in kauppalista {
+        let mut ainest: Vec<Aines> = sql!(connection, Aines.filter(nimi == aines)).unwrap(); 
+        if ainest.len() == 1 {
+            let ainest = ainest.pop().unwrap();
+            if tyyppilista.contains_key(&ainest.ainestyyppi) {
+                let mut tyyppi = tyyppilista.get_mut(&ainest.ainestyyppi).unwrap();
+                tyyppi.push((aines, maara, mitta));
+            }
+            else {
+                tyyppilista.insert(ainest.ainestyyppi, vec![(aines, maara, mitta)]);
+            }
+        }
+    }
+
+    for (tyyppi, ainesv) in tyyppilista {
+        contents.push_str("<h4>");
+        contents.push_str(&tyyppi);
+        contents.push_str("</h4>");
+        contents.push_str("<ul>");
+        for (aines, maara, mitta) in ainesv {
+            contents.push_str("<li>");
+            contents.push_str(&maara.to_string());
+            contents.push_str(" ");
+            if maara > 1.0 {
+                let aineslista: Vec<Ainesmitta> = sql!(connection, Ainesmitta.filter(mitta == mitta)).unwrap(); 
+                for ainesmitta in aineslista {
+                    match ainesmitta.monikko {
+                        Some(monikko) => {
+                            contents.push_str(&monikko);
+                        },
+                        None => {
+                            contents.push_str(&mitta);
+                        }
+                    }
+                }
+            }
+            else {
+                contents.push_str(&mitta);
+            }
+            contents.push_str(" ");
+            if maara > 1.0 {
+                let ainesl: Vec<Aines> = sql!(connection, Aines.filter(nimi == aines)).unwrap(); 
+                for ainesm in ainesl {
+                    match ainesm.monikko {
+                        Some(monikko) => {
+                            contents.push_str(&monikko);
+                        },
+                        None => {
+                            contents.push_str(&aines);
+                        }
+                    }
+                }
+            }
+            else {
+                contents.push_str(&aines);
+            }
+            contents.push_str("</li>");
+        }
+        contents.push_str("</ul>");
+    }
+    return contents;
+}
+

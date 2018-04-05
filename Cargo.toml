@@ -1,6 +1,6 @@
 [package]
 name = "arki-server"
-version = "0.1.3"
+version = "0.1.4"
 authors = ["jq-rs"]
 
 [dependencies]
@@ -17,5 +17,5 @@ tk-listen = "0.1"
 lazy_static = "1.0"
 rusqlite = "0.13"
 fnv = "1.0.0"
-mles-utils = { path = "../../mles/mles-rs/mles-utils" }
+mles-utils = "1.0.6"
 bytes = "0.4"

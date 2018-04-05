@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mles.io</title>
+<title>MlesTalk Application Information</title>
 <link rel="stylesheet" href="https://gitcdn.link/repo/Chalarangelo/mini.css/master/dist/mini-default.min.css" />
 <style>
 #bwidth {
@@ -19,11 +19,36 @@
 <div>
 <img src="images/mles_logo_final.png" alt="Mles logo" width="100" />
 </div>
-<p><b>Mles</b> (<i>Modern Lightweight channEl Service</i>) is a lightweight, robust and authenticated distributed publish/subscribe data service based on Rust (a safe, concurrent and fast systems language), Tokio (asynchronous networking for Rust) and Serde (serialization framework for Rust). It works seamlessly with IPv4 or IPv6 on TCP, which provides its reliable data transfer backbone on Rust supported platforms, including Linux, OSX and Windows.</p>
+<p><b>MlesTalk</b> is a mobile application which uses Mles (<i>Modern Lightweight channEl Service</i>) - Websocket protocol to exchange information.</p>
 
-<h2>App info</h2>
+<h2>About MlesTalk application</h2>
+<p>MlesTalk is a real-time per-character-input chat between two or more users on a same channel. Instead of just seeing the finalized messages, see how others on the same channel write their messages, character by character. Avoid centralized services, have the freedom to pick freely the server to connect to.</p>
 
-<p>This is a placeholder for app information TBA.</p>
+<p>In addition to username and channel, you'll need to pick a shared key with other channel users. The key provides lightweight security for the messages on the channel.</p>
+
+<p>Retro-feeling for those Unix-era users who have used the magnificent Talk program.</p>
+
+<p>Connectivity is based on open Mles-Websocket protocol. Please see <a href="http://mles.io">http://mles.io</a> for more information.</p>
+
+<h2>About Mles.io server</h2>
+
+<p>Mles.io has a service server support implemented for the MlesTalk application and this server is suggested by default to be used by the MlesTalk application. Mles.io provides a limited history of messages for users during initial connection, if messages already exists on the channel. The Mles.io service is provided as is as a best effort service without any liability. The MlesTalk application user is free to select any server they wish to connect to, as long as it supports Mles-Websocket protocol.</p>
+
+<p>Mles.io will always run the latest released open source version of the Mles-Websocket server service called <a href="https://github.com/jq-rs/arki-server">arki-server</a> and it does not collect any information of MlesTalk application users. The users are always welcome to review the source code of <i>arki-server</i> or establish their own Mles-Websocket service. Please see <a href="http://mles.io/legal">http://mles.io/legal</a> for the full Privacy Notice and other legal information.</p> 
+
+<h2>Frequently Asked Questions</h2>
+
+<h4>What kind of network connection MlesTalk needs?</h4>
+
+<p>MlesTalk uses Mles-Websocket protocol over Transmission Control Protocol (TCP). You should be able to use it with any internet connection. If your connection is not stable, you may need to reconnect from time to time.</p>
+
+<h4>Are sent or received messages saved somewhere for later retrieval by the MlesTalk application?</h4>
+
+<p>Messages are not saved by the application anywhere and are in practice lost when the MlesTalk application is closed.</p>
+
+<h4>How are the messages secured?</h4>
+
+<p>All messages are secured with symmetrical Blowfish ECB with max key length of 56-bits. Messages can be easily opened only by the channel users who have the channel name and the key available. These security measures will not protect messages from serious decryption efforts, if messages are obtained by a 3rd party. The Mles-Websocket server, which forwards messages on the selected channel, is not aware of the key used on the channel.</p>
 
 <br />
 </div>
