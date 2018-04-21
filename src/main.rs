@@ -159,16 +159,30 @@ fn service<S>(req: Request, mut e: Encoder<S>)
         }
     }
     else {
-        match FILE_MAP.get(path) {
-            Some(filepath) => {
-                let mut contents = Vec::new();
-                let mut file = File::open(filepath).unwrap();
-                let res = file.read_to_end(&mut contents);
-                let sz = res.unwrap();
-                e.status(Status::Ok);
-                e.add_length(sz as u64).unwrap();
-                if e.done_headers().unwrap() {
-                    e.write_body(&contents);
+        let splitted_path: Vec<&str> = path.split('?').collect();
+        let split_path = splitted_path.first();
+        match split_path {
+            Some(apath) => {
+                match FILE_MAP.get(apath) {
+                    Some(filepath) => {
+                        let mut contents = Vec::new();
+                        let mut file = File::open(filepath).unwrap();
+                        let res = file.read_to_end(&mut contents);
+                        let sz = res.unwrap();
+                        e.status(Status::Ok);
+                        e.add_length(sz as u64).unwrap();
+                        if e.done_headers().unwrap() {
+                            e.write_body(&contents);
+                        }
+                    },
+                    None => {
+                        let contents = "404 error!";
+                        e.status(Status::NotFound);
+                        e.add_length(contents.len() as u64).unwrap();
+                        if e.done_headers().unwrap() {
+                            e.write_body(contents.as_bytes());
+                        }
+                    }
                 }
             },
             None => {
