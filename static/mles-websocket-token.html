@@ -1523,7 +1523,7 @@ function open_socket() {
     };
 
     webSocket.onclose = function(event) {
-        alert('Virhe: yhteys on suljettu. Yritä uudelleen.');
+        alert('Connection error. Please try again.');
         close_socket();
     };
 }
@@ -1678,7 +1678,7 @@ function send_message(uid, channel, message, isFull) {
     <div id="message_cont" class="box_with_shadow">
 
         <ul id="messages">
-        <img src="http://mles.io/images/mles_logo_final.png" alt="Mles logo" style="float:right;width:70px;margin:2px 5px 2px 2px;" />
+        <img src="http://mles.io/images/mles_logo_final.png" alt="Mles logo" style="float:right;width:70px;margin:5px 5px 5px 5px;" />
         </ul>
 
         <div id="input_message_cont">
