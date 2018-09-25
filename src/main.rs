@@ -1,4 +1,4 @@
-#![feature(proc_macro)]
+//#![feature(proc_macro)]
 extern crate tokio_core;
 extern crate futures;
 extern crate tk_bufstream;
@@ -7,15 +7,16 @@ extern crate tk_http;
 extern crate tk_listen;
 #[macro_use]
 extern crate lazy_static;
-extern crate rusqlite;
+//extern crate rusqlite;
 extern crate fnv;
 extern crate bytes;
 extern crate mles_utils;
 extern crate tokio_io;
 
-extern crate tql;
-#[macro_use]
-extern crate tql_macros;
+//#[macro_use]
+//extern crate tql;
+//#[macro_use]
+//extern crate tql_macros;
 
 use tokio_core::net::{TcpListener};
 use futures::{Stream, Future, Sink};
@@ -45,20 +46,22 @@ use std::fs::File;
 use std::io::{Error as StdError, ErrorKind};
 use std::net::{SocketAddr};
 
-use rusqlite::Connection;
-use tql::PrimaryKey;
-use tql_macros::sql;
+//use rusqlite::Connection;
+//use tql::PrimaryKey;
+//use tql_macros::sql;
 use fnv::FnvHashMap;
 use mles_utils::*;
         
 const ACCEPTED_PROTOCOL: &str = "mles-websocket";
 
+/*
 fn get_connection() -> Connection {
     Connection::open("arki.db").unwrap()
 }
 
 #[derive(SqlTable)]
 struct Ateria {
+    id: PrimaryKey,
     nimi: String,
     ohje: Option<String>,
     avainsanat: Option<String>,
@@ -67,6 +70,7 @@ struct Ateria {
 
 #[derive(SqlTable)]
 struct Aineslista {
+    id: PrimaryKey,
     ateria: String,
     aines: String,
     maara: f64,
@@ -75,6 +79,7 @@ struct Aineslista {
 
 #[derive(SqlTable)]
 struct Aines {
+    id: PrimaryKey,
     nimi: String,
     monikko: Option<String>,
     ainestyyppi: String
@@ -82,10 +87,11 @@ struct Aines {
 
 #[derive(SqlTable)]
 struct Ainesmitta {
+    id: PrimaryKey,
     mitta: String,
     monikko: Option<String>
 }
-
+*/
 lazy_static! {
     static ref FILE_MAP: FnvHashMap<&'static str, &'static str> = {
         let mut file_map = FnvHashMap::default();
@@ -107,10 +113,10 @@ fn service<S>(req: Request, mut e: Encoder<S>)
     -> FutureResult<EncoderDone<S>, Error>
 {
     let path = req.path();
-    let mut host = "mles.io";
-    if let Some(newhost) = req.host() {
-        host = newhost;
-    } 
+    //let host = "mles.io";
+    //if let Some(newhost) = req.host() {
+    //    host = newhost;
+    //} 
 
     /* WebSocket upgrade handling */
     if let Some(ws) = req.websocket_handshake() {
@@ -137,6 +143,7 @@ fn service<S>(req: Request, mut e: Encoder<S>)
         return ok(e.done());
     }
 
+    /*
     if host == "40arkiruokaa.fi" {
         let mut header = Vec::new();
         let mut file = File::open("static/arkiheader.html").unwrap();
@@ -158,7 +165,7 @@ fn service<S>(req: Request, mut e: Encoder<S>)
             e.write_body(&header);
         }
     }
-    else {
+    else {*/
         let splitted_path: Vec<&str> = path.split('?').collect();
         let split_path = splitted_path.first();
         match split_path {
@@ -194,7 +201,7 @@ fn service<S>(req: Request, mut e: Encoder<S>)
                 }
             }
         }
-    }
+    //}
     ok(e.done())
 }
 
@@ -389,6 +396,7 @@ impl TokioEncoder for Bytes {
     }
 }
 
+/*
 fn handle_40arkiruokaa()-> String {
     let mut contents = String::new();
     let mut kauppalista: FnvHashMap<String, (f64, String)> = FnvHashMap::default();
@@ -405,7 +413,9 @@ fn handle_40arkiruokaa()-> String {
         contents.push_str("<h3>");
         contents.push_str(&ateria.nimi);
         contents.push_str("</h3>");
-        let ainekset: Vec<Aineslista> = sql!(connection, Aineslista.filter(ateria == ateria.nimi)).unwrap(); 
+        let animi = "Eeppinen".to_string();
+        //String::from(ateria.nimi);
+        let ainekset: Vec<Aineslista> = sql!(connection, Aineslista.filter(ateria == animi)).unwrap(); 
         contents.push_str("<h4>");
         contents.push_str("Ainekset:");
         contents.push_str("</h4>");
@@ -450,7 +460,8 @@ fn handle_40arkiruokaa()-> String {
             contents.push_str(" ");
 
             if aines.maara > 1.0 {
-                let ainesl: Vec<Aines> = sql!(connection, Aines.filter(nimi == aines.aines)).unwrap(); 
+                let animi = aines.aines;
+                let ainesl: Vec<Aines> = sql!(connection, Aines.filter(nimi == animi)).unwrap(); 
                 for ainesm in ainesl {
                     match ainesm.monikko {
                         Some(monikko) => {
@@ -547,4 +558,4 @@ fn handle_40arkiruokaa()-> String {
     }
     return contents;
 }
-
+*/
