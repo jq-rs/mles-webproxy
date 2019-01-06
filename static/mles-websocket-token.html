@@ -343,9 +343,9 @@ $(document).ready(function() {
 			  
 function ask_channel() {
     if ($('#input_name').val().trim().length <= 0 ||
-        ($('#input_channel').val().trim().length <= 0 && mytoken == null) ||
+        mytoken == null ||
         $('#input_key').val().trim().length <= 0 ) {
-        alert('Name, channel and shared key?');
+        alert('Token, name, and shared key?');
     } else {
 		if(mytoken != null) {
 			var token = mytoken.trim();
@@ -393,14 +393,7 @@ function ask_channel() {
 
 function send(isFull) {
     var message = $('#input_message').val();
-	var file = document.getElementById("input_file").files[0];
-
-	if(file) {
-		send_image(myname, mychannel, file);
-	}
-	else {
-		send_message(myname, mychannel, message, isFull);
-	}
+    send_message(myname, mychannel, message, isFull);
 }
 
 function close_socket() {
@@ -803,10 +796,6 @@ function get_token() {
         <div id="input_message_cont">
             <form id="form_send_message" method="post" action="#">
                 <div class="field">
-				<label for="input_file">
-					<img src="img/sendimage.png" style="float:right;height:35px;" />
-				</label>
-				<input id="input_file" type="file" onchange="send(true);" accept="image/*"  />
                 <input type="submit" id="the_send" onclick="send(true);" value="&#9166;" />
 				<span><input type="text" id="input_message" oninput="send(false);" autocomplete="off" autofocus /></span>
                 </div>
