@@ -1,7 +1,8 @@
 [package]
 name = "arki-server"
-version = "0.1.7"
+version = "0.2.0"
 authors = ["jq-rs"]
+edition = "2018"
 
 [dependencies]
 tokio = "0.1"
@@ -13,13 +14,6 @@ netbuf = "0.3"
 tk-http = "0.3"
 tk-listen = "0.1"
 lazy_static = "1.0"
-#rusqlite = "0.13"
 fnv = "1.0.0"
-mles-utils = "1.0.6"
+mles-utils = "1.1.0"
 bytes = "0.4"
-#tql_macros = { git = "https://github.com/jq-rs/tql" }
-
-#[dependencies.tql]
-#git = "https://github.com/jq-rs/tql"
-#default-features = false
-#features = ["sqlite"]

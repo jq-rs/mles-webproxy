@@ -39,59 +39,17 @@ use std::time::Duration;
 
 use tokio_core::reactor::Core;
 use tokio_core::net::TcpStream;
-use tokio_io::AsyncRead;
 use tokio_io::codec::{Encoder as TokioEncoder, Decoder as TokioDecoder};
 
 use std::fs::File;
 use std::io::{Error as StdError, ErrorKind};
 use std::net::{SocketAddr};
 
-//use rusqlite::Connection;
-//use tql::PrimaryKey;
-//use tql_macros::sql;
 use fnv::FnvHashMap;
 use mles_utils::*;
         
 const ACCEPTED_PROTOCOL: &str = "mles-websocket";
 
-/*
-fn get_connection() -> Connection {
-    Connection::open("arki.db").unwrap()
-}
-
-#[derive(SqlTable)]
-struct Ateria {
-    id: PrimaryKey,
-    nimi: String,
-    ohje: Option<String>,
-    avainsanat: Option<String>,
-    lahde: Option<String>
-}
-
-#[derive(SqlTable)]
-struct Aineslista {
-    id: PrimaryKey,
-    ateria: String,
-    aines: String,
-    maara: f64,
-    mitta: Option<String>
-}
-
-#[derive(SqlTable)]
-struct Aines {
-    id: PrimaryKey,
-    nimi: String,
-    monikko: Option<String>,
-    ainestyyppi: String
-}
-
-#[derive(SqlTable)]
-struct Ainesmitta {
-    id: PrimaryKey,
-    mitta: String,
-    monikko: Option<String>
-}
-*/
 lazy_static! {
     static ref FILE_MAP: FnvHashMap<&'static str, &'static str> = {
         let mut file_map = FnvHashMap::default();
@@ -105,6 +63,18 @@ lazy_static! {
         file_map.insert("/images/mles_header_key.png", "static/images/mles_header_key.png");
         file_map.insert("/images/mles_usecase_with_clients_trans.png", "static/images/mles_usecase_with_clients_trans.png");
         file_map.insert("/images/mles_usecase_with_peer_trans.png", "static/images/mles_usecase_with_peer_trans.png");
+        file_map.insert("/img/icon.png", "static/img/icon.png");
+        file_map.insert("/img/sendimage.png", "static/img/sendimage.png");
+        file_map.insert("/img/smallIcon.png", "static/img/smallIcon.png");
+        file_map.insert("/js/Autolinker.min.js", "static/js/Autolinker.min.js");
+        file_map.insert("/js/blake2.js", "static/js/blake2s.js");
+        file_map.insert("/js/blowfish.js", "static/js/blowfish.js");
+        file_map.insert("/js/cbor.js", "static/js/cbor.js");
+        file_map.insert("/js/jquery-3.3.1.min.js", "static/js/jquery-3.3.1.min.js");
+        file_map.insert("/js/qrcode.min.js", "static/js/qrcode.min.js");
+        file_map.insert("/js/siphash.js", "static/js/siphash.js");
+        file_map.insert("/js/websocket.js", "static/js/websocket.js");
+        file_map.insert("/js/zoom-vanilla.js", "static/js/zoom-vanilla.js");
         file_map
     };
 }
@@ -113,10 +83,6 @@ fn service<S>(req: Request, mut e: Encoder<S>)
     -> FutureResult<EncoderDone<S>, Error>
 {
     let path = req.path();
-    //let host = "mles.io";
-    //if let Some(newhost) = req.host() {
-    //    host = newhost;
-    //} 
 
     /* WebSocket upgrade handling */
     if let Some(ws) = req.websocket_handshake() {
@@ -143,65 +109,41 @@ fn service<S>(req: Request, mut e: Encoder<S>)
         return ok(e.done());
     }
 
-    /*
-    if host == "40arkiruokaa.fi" {
-        let mut header = Vec::new();
-        let mut file = File::open("static/arkiheader.html").unwrap();
-
-        let _res = file.read_to_end(&mut header);
-
-        let contents = handle_40arkiruokaa();
-
-        let mut footer = Vec::new();
-        let mut file = File::open("static/arkifooter.html").unwrap();
-        let _res = file.read_to_end(&mut footer);
-
-        header.extend(contents.as_bytes());
-        header.extend(footer);
-
-        e.status(Status::Ok);
-        e.add_length(header.len() as u64).unwrap();
-        if e.done_headers().unwrap() {
-            e.write_body(&header);
-        }
-    }
-    else {*/
-        let splitted_path: Vec<&str> = path.split('?').collect();
-        let split_path = splitted_path.first();
-        match split_path {
-            Some(apath) => {
-                match FILE_MAP.get(apath) {
-                    Some(filepath) => {
-                        let mut contents = Vec::new();
-                        let mut file = File::open(filepath).unwrap();
-                        let res = file.read_to_end(&mut contents);
-                        let sz = res.unwrap();
-                        e.status(Status::Ok);
-                        e.add_length(sz as u64).unwrap();
-                        if e.done_headers().unwrap() {
-                            e.write_body(&contents);
-                        }
-                    },
-                    None => {
-                        let contents = "404 error!";
-                        e.status(Status::NotFound);
-                        e.add_length(contents.len() as u64).unwrap();
-                        if e.done_headers().unwrap() {
-                            e.write_body(contents.as_bytes());
-                        }
+    let splitted_path: Vec<&str> = path.split('?').collect();
+    let split_path = splitted_path.first();
+    match split_path {
+        Some(apath) => {
+            match FILE_MAP.get(apath) {
+                Some(filepath) => {
+                    let mut contents = Vec::new();
+                    let mut file = File::open(filepath).unwrap();
+                    let res = file.read_to_end(&mut contents);
+                    let sz = res.unwrap();
+                    e.status(Status::Ok);
+                    e.add_length(sz as u64).unwrap();
+                    if e.done_headers().unwrap() {
+                        e.write_body(&contents);
+                    }
+                },
+                None => {
+                    let contents = "404 error!";
+                    e.status(Status::NotFound);
+                    e.add_length(contents.len() as u64).unwrap();
+                    if e.done_headers().unwrap() {
+                        e.write_body(contents.as_bytes());
                     }
                 }
-            },
-            None => {
-                let contents = "404 error!";
-                e.status(Status::NotFound);
-                e.add_length(contents.len() as u64).unwrap();
-                if e.done_headers().unwrap() {
-                    e.write_body(contents.as_bytes());
-                }
+            }
+        },
+        None => {
+            let contents = "404 error!";
+            e.status(Status::NotFound);
+            e.add_length(contents.len() as u64).unwrap();
+            if e.done_headers().unwrap() {
+                e.write_body(contents.as_bytes());
             }
         }
-    //}
+    }
     ok(e.done())
 }
 
@@ -253,7 +195,7 @@ fn main() {
                 .map_err(|e| { println!("Connection error: {}", e); })
                 .then(|_| Ok(())) // don't fail, please
         })
-    .listen(1000);
+    .listen(100000);
 
     lp.run(done).unwrap();
 }
@@ -298,7 +240,7 @@ pub fn process_mles_client(ws_tx: UnboundedSender<Packet>, mles_rx: UnboundedRec
                 keys.push(keyaddr);
             }
         }
-        let (sink, stream) = stream.framed(Bytes).split();
+        let (sink, stream) = Bytes.framed(stream).split();
         let mles_rx = mles_rx.map_err(|_| panic!()); // errors not possible on rx XXX
         let mles_rx = mles_rx.and_then(|buf| { //we receive websocket packet here
             match buf {
@@ -396,166 +338,3 @@ impl TokioEncoder for Bytes {
     }
 }
 
-/*
-fn handle_40arkiruokaa()-> String {
-    let mut contents = String::new();
-    let mut kauppalista: FnvHashMap<String, (f64, String)> = FnvHashMap::default();
-    contents.push_str("<h2>");
-    contents.push_str("40arkiruokaa.fi");
-    contents.push_str("</h2>");
-    contents.push_str("<p>Neljäkymmentä arkiruokaa, joissa on ripaus gourmeta! 10 % ohjeista lisätty tällä hetkellä.</p><p>Muista luomu aina kun mahdollista. Voit korvata halutessasi kaikki liha ja kala-ateriat kasviproteiineilla, katso vinkit ohjeiden lopusta.</p>");
-
-    let connection = get_connection();
-
-
-    let ateriat: Vec<Ateria> = sql!(connection, Ateria.all()).unwrap(); 
-    for ateria in ateriat {
-        contents.push_str("<h3>");
-        contents.push_str(&ateria.nimi);
-        contents.push_str("</h3>");
-        let animi = "Eeppinen".to_string();
-        //String::from(ateria.nimi);
-        let ainekset: Vec<Aineslista> = sql!(connection, Aineslista.filter(ateria == animi)).unwrap(); 
-        contents.push_str("<h4>");
-        contents.push_str("Ainekset:");
-        contents.push_str("</h4>");
-        contents.push_str("<ul>");
-        for aines in ainekset {
-            contents.push_str("<li>");
-
-            contents.push_str(&aines.maara.to_string());
-            contents.push_str(" ");
-            let mitta = aines.mitta.clone();
-            match mitta {
-                Some(mitta) => {
-                    let kaines = aines.aines.clone();
-                    let mut kmaaramitta = kauppalista.entry(kaines).or_insert((0.0, "".to_string()));
-                    let & mut (ref mut kmaara, ref mut kmitta) = & mut *kmaaramitta;
-                    *kmaara += aines.maara.clone();
-                    *kmitta = mitta.clone();
-                    if aines.maara > 1.0 {
-                        let aineslista: Vec<Ainesmitta> = sql!(connection, Ainesmitta.filter(mitta == mitta)).unwrap(); 
-                        for ainesmitta in aineslista {
-                            match ainesmitta.monikko {
-                                Some(monikko) => {
-                                    contents.push_str(&monikko);
-                                },
-                                None => {
-                                    contents.push_str(&mitta);
-                                }
-                            }
-                        }
-                    }
-                    else {
-                        contents.push_str(&mitta);
-                    }
-                },
-                None => {
-                    let kaines = aines.aines.clone();
-                    let mut kmaaramitta = kauppalista.entry(kaines).or_insert((0.0, "".to_string()));
-                    let & mut (ref mut kmaara, _) = & mut *kmaaramitta;
-                    *kmaara += aines.maara.clone();
-                }
-            }
-            contents.push_str(" ");
-
-            if aines.maara > 1.0 {
-                let animi = aines.aines;
-                let ainesl: Vec<Aines> = sql!(connection, Aines.filter(nimi == animi)).unwrap(); 
-                for ainesm in ainesl {
-                    match ainesm.monikko {
-                        Some(monikko) => {
-                            contents.push_str(&monikko);
-                        },
-                        None => {
-                            contents.push_str(&aines.aines);
-                        }
-                    }
-                }
-            }
-            else {
-                contents.push_str(&aines.aines);
-            }
-            contents.push_str(" ");
-            contents.push_str("</li>");
-        }
-        contents.push_str("</ul>");
-        contents.push_str("<p>");
-        match ateria.ohje {
-            Some(ohje) => {
-                contents.push_str(&ohje);
-            },
-            None => {}
-        }
-        contents.push_str("</p>");
-        contents.push_str("<hr />");
-    }
-    contents.push_str("<h3>");
-    contents.push_str("Kauppalista");
-    contents.push_str("</h3>");
-
-    let mut tyyppilista: FnvHashMap<String, Vec<(String, f64, String)>> = FnvHashMap::default();
-
-    for (aines, (maara, mitta)) in kauppalista {
-        let mut ainest: Vec<Aines> = sql!(connection, Aines.filter(nimi == aines)).unwrap(); 
-        if ainest.len() == 1 {
-            let ainest = ainest.pop().unwrap();
-            if tyyppilista.contains_key(&ainest.ainestyyppi) {
-                let mut tyyppi = tyyppilista.get_mut(&ainest.ainestyyppi).unwrap();
-                tyyppi.push((aines, maara, mitta));
-            }
-            else {
-                tyyppilista.insert(ainest.ainestyyppi, vec![(aines, maara, mitta)]);
-            }
-        }
-    }
-
-    for (tyyppi, ainesv) in tyyppilista {
-        contents.push_str("<h4>");
-        contents.push_str(&tyyppi);
-        contents.push_str("</h4>");
-        contents.push_str("<ul>");
-        for (aines, maara, mitta) in ainesv {
-            contents.push_str("<li>");
-            contents.push_str(&maara.to_string());
-            contents.push_str(" ");
-            if maara > 1.0 {
-                let aineslista: Vec<Ainesmitta> = sql!(connection, Ainesmitta.filter(mitta == mitta)).unwrap(); 
-                for ainesmitta in aineslista {
-                    match ainesmitta.monikko {
-                        Some(monikko) => {
-                            contents.push_str(&monikko);
-                        },
-                        None => {
-                            contents.push_str(&mitta);
-                        }
-                    }
-                }
-            }
-            else {
-                contents.push_str(&mitta);
-            }
-            contents.push_str(" ");
-            if maara > 1.0 {
-                let ainesl: Vec<Aines> = sql!(connection, Aines.filter(nimi == aines)).unwrap(); 
-                for ainesm in ainesl {
-                    match ainesm.monikko {
-                        Some(monikko) => {
-                            contents.push_str(&monikko);
-                        },
-                        None => {
-                            contents.push_str(&aines);
-                        }
-                    }
-                }
-            }
-            else {
-                contents.push_str(&aines);
-            }
-            contents.push_str("</li>");
-        }
-        contents.push_str("</ul>");
-    }
-    return contents;
-}
-*/
