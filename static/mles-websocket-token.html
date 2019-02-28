@@ -1,9 +1,6 @@
 <!DOCTYPE html>
-
-<!-- New features 27.12.2018: blake2s hashing, separated ecb and cbc keys, CBC + HMAC w/ CTS support for messages, vanilla zoom support -->
 <html>
 <head>
-	<!-- <meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline'; style-src * 'unsafe-inline'; media-src *; img-src 'self' data:; connect-src ws://*;"> -->
 <title>Mles WebSocket Channels</title>
 <link href="css/zoom.css" rel="stylesheet">
 <meta charset="utf-8">
@@ -236,6 +233,10 @@ var reconn_timeout = RETIMEOUT;
 
 var isTokenChannel = false;
 
+var lastMessageSeenTs = 0;
+var lastMessageNotifiedTs = 0;
+var lastMessage = {};
+
 var weekday = new Array(7);
 weekday[0] = "Sun";
 weekday[1] = "Mon";
@@ -278,7 +279,7 @@ function stamptime(msgdate) {
 	if(dd<10) dd='0'+dd;
 	if(mm<10) mm='0'+mm;
     if(m<10) m='0'+m;
-    return "[" + dd + '.' + mm + '.' + yyyy + ' ' + day + ' ' + h + ':' + m + "] ";
+    return dd + '.' + mm + '.' + yyyy + ' ' + day + ' ' + h + ':' + m;
 }
 
 function timenow(){
@@ -315,7 +316,7 @@ function onLoad() {
 			text: 'Notifications active',
 		});
 		cordova.plugins.backgroundMode.on('activate', function() {
-		cordova.plugins.backgroundMode.disableWebViewOptimizations(); 
+			cordova.plugins.backgroundMode.disableWebViewOptimizations(); 
 		});
 		isCordova = true;
 	}, false);
@@ -323,11 +324,18 @@ function onLoad() {
 
 
 function onPause() {
+	if(isCordova)
+		cordova.plugins.backgroundMode.enable();
     will_notify = true;
+	lastMessageNotifiedTs = lastMessageSeenTs;
 }
 
 function onResume() {
 	will_notify = false;
+	if(isCordova) {
+		cordova.plugins.notification.local.clearAll();
+		cordova.plugins.backgroundMode.disable();
+	}
 }
 
 $(document).ready(function() {
@@ -368,14 +376,6 @@ function ask_channel() {
 
         myname = $('#input_name').val().trim();
         var fullkey = $('#input_key').val().trim();
-		addrportinput = $('#input_addr_port').val().trim();
-		var addrarray = addrportinput.split(":");
-		if (addrarray.length > 0) {
-			myaddr = addrarray[0];
-		}
-		if (addrarray.length > 1) {
-			myport = addrarray[1];
-		}
 		if(myaddr == '') {
 			myaddr = 'mles.io';
 		}
@@ -391,9 +391,17 @@ function ask_channel() {
     return false;
 }
 
+function sendEmptyJoin() {
+	send_message(myname, mychannel, "", true);
+	
+	//after reconnect, start locally from a new line
+	ownid = ownid + 1;
+	ownappend = false;
+}
+
 function send(isFull) {
     var message = $('#input_message').val();
-    send_message(myname, mychannel, message, isFull);
+	send_message(myname, mychannel, message, isFull);
 }
 
 function close_socket() {
@@ -428,7 +436,7 @@ webWorker.onmessage = function(e) {
 			
 			if(uid.length > 0 && channel.length > 0) {
 				initOk = true;
-				send(true);
+				sendEmptyJoin();
 				var li;
 				if(!isTokenChannel) {
 					li = '<li class="new"> - <span class="name">' + uid + "@" + channel + '</span> - </li>';
@@ -461,7 +469,7 @@ webWorker.onmessage = function(e) {
 		case "data":
 			var uid = e.data[1];
 			var channel = e.data[2];
-			var dateString = e.data[3];
+			var msgTimestamp = e.data[3];
 			var message = e.data[4];
 			var isImage = e.data[5];
 			var isMultipart = e.data[6];
@@ -496,9 +504,13 @@ webWorker.onmessage = function(e) {
 			}
 			
 			if(message.length > 2) {
+				if(lastMessageSeenTs < msgTimestamp) {
+					lastMessageSeenTs = msgTimestamp;
+				}
 
 				var li;
 				var now = timenow();
+				var dateString = "[" + stamptime(new Date(msgTimestamp)) + "] ";
 				if (dateString.charAt(0) == '[' && dateString.charAt(1) == now.charAt(0) && dateString.charAt(2) == now.charAt(1) &&
 					dateString.charAt(4) == now.charAt(3) && dateString.charAt(5) == now.charAt(4)) {
 					dateString = dateString.slice(16, dateString.length);
@@ -535,7 +547,7 @@ webWorker.onmessage = function(e) {
 					$('#messages').append(li);
 					idappend[duid] = true;
 				}
-				
+		
 				if(isFull) {
 					idhash[duid] = idhash[duid] + 1;
 					idappend[duid] = false;
@@ -548,22 +560,12 @@ webWorker.onmessage = function(e) {
 					scrollToBottom();
 				}
 				
-				if(true == isFull && will_notify) {
+				if(uid != myname && isFull && will_notify &&
+				   can_notify && lastMessageNotifiedTs < msgTimestamp) {
 					if(true == isImage) {
 						message = "<an image>";
 					}
-					if(can_notify) {
-						cordova.plugins.notification.local.schedule({
-							title: uid,
-							text: message,
-							icon: 'file://img/icon.png',
-							foreground: false,
-						});
-					}
-					if(can_vibrate) {
-						navigator.vibrate(1000);
-					} 
-
+					do_notify(uid, channel, msgTimestamp, message);
 				}
 
 			}
@@ -583,9 +585,34 @@ webWorker.onmessage = function(e) {
 			if(initOk) {
 				var li = '<li class="new"> - <span class="name">reconnecting</span> - </li>';
 				$('#messages').append(li);
+				scrollToBottom();
 			}
 			break;
 	}
+}
+
+var notifyInProgress = false;
+async function do_notify(uid, channel, msgTimestamp, message) {
+	lastMessage[channel] = [msgTimestamp, uid, message];
+	if(notifyInProgress) {
+		return;
+	}
+	notifyInProgress = true;
+	await sleep(1000);
+	var msg = lastMessage[channel];
+	lastMessageNotifiedTs = msg[0];
+	notifyInProgress = false;
+	if(isCordova) {
+		cordova.plugins.notification.local.schedule({
+			title: msg[1],
+			text: msg[2],
+			icon: 'file://img/icon.png',
+			foreground: false,
+		});
+		if(can_vibrate) {
+			navigator.vibrate(1000);
+		}
+	}		
 }
 
 function sleep(ms) {
@@ -620,8 +647,9 @@ function send_data(cmd, uid, channel, data, isImage, isMultipart, isFirst, isLas
 }
 
 function send_message(uid, channel, message, isFull) {
+	var msglen = message.length;
 
-	if(message.length == 0)
+	if(msglen == 0)
 		message = message + "\n";
 	if(true == isFull)
 		message = message + "\n";
@@ -653,7 +681,7 @@ function send_message(uid, channel, message, isFull) {
 		
     scrollToBottom();
  
-	if(isFull)
+	if(isFull && msglen > 0)
 		$('#input_message').val('');
 }
 
@@ -761,16 +789,12 @@ function get_token() {
 <div class="body_cont">
     <div id="name_channel_cont" class="box_with_shadow">
         <form id="channel_submit" method="post">
-	    <p>MlesTalk invitation!</p>
+		<p>MlesTalk invitation!</p>
             <p>Your name?</p>
 		    <input type="text" id="input_name" />
             <p>Shared key?</p>
             <input type="password" id="input_key" autocomplete="off">
 			<input type="submit" value="&rarr;" id="the_join">
-			<div id="server_cont" class="box_with_shadow">
-			<p>Mles WebSocket server address</p>
-			<input type="text" id="input_addr_port" value="mles.io:80" />
-            </div>
 	      </form>
 		  <a href="http://mles.io/app">app info</a> <a href="http://mles.io/legal">legal</a>
     </div>

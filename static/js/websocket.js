@@ -125,27 +125,18 @@ function u8arr2iv(ivm) {
 	return iv;
 }
 
-var weekday = new Array(7);
-weekday[0] = "Sun";
-weekday[1] = "Mon";
-weekday[2] = "Tue";
-weekday[3] = "Wed";
-weekday[4] = "Thu";
-weekday[5] = "Fri";
-weekday[6] = "Sat";
-
-function stamptime(msgdate) {
-	var dd=msgdate.getDate(),
-	mm=msgdate.getMonth()+1,
-	yyyy=msgdate.getFullYear(),
-    h=msgdate.getHours(), 
-    m=msgdate.getMinutes(), 
-    day=weekday[msgdate.getDay()];
-	if(dd<10) dd='0'+dd;
-	if(mm<10) mm='0'+mm;
-    if(m<10) m='0'+m;
-    return "[" + dd + '.' + mm + '.' + yyyy + ' ' + day + ' ' + h + ':' + m + "] ";
+function load32(a, i) {
+    return (a[i + 0] & 0xff) | ((a[i + 1] & 0xff) << 8) |
+           ((a[i + 2] & 0xff) << 16) | ((a[i + 3] & 0xff) << 24);
 }
+
+function store32(a, i, val) {
+	a[i+0] = val & 0xff;
+	a[i+1] = (val & 0xff00) >> 8;
+	a[i+2] = (val & 0xff0000) >> 16;
+	a[i+3] = (val & 0xff000000) >> 24;
+	return a;
+} 
 
 function StringToUint8(str) {
     var arr = new Uint8Array(str.length);
@@ -225,7 +216,6 @@ function open_socket(myport, myaddr, uid, channel) {
 			var warray = bfCbc.split64by32(weekstring);
 			var weekU14 = unscatterTime(warray[0], warray[1]);
 			var msgDate = readTimestamp(timeU14 & ~0x4000, weekU14 & ~(0x4000|0x2000|0x1000));
-			var dateString = stamptime(msgDate);
 			var message = decrypted.slice(16, decrypted.byteLength);
 			
 			var isImage = false;
@@ -241,7 +231,7 @@ function open_socket(myport, myaddr, uid, channel) {
 			if(weekU14 & 0x1000)
 				isLast = true;
 			
-			postMessage(["data", uid, channel, dateString, message, isImage, isMultipart, isFirst, isLast]);
+			postMessage(["data", uid, channel, msgDate.valueOf(), message, isImage, isMultipart, isFirst, isLast]);
         }
     };
 
@@ -268,15 +258,32 @@ onmessage = function(e) {
 			
 			var round = new BLAKE2s();
 			round.update(StringToUint8(fullkey));
+			
 			var blakecb = new BLAKE2s(7); //56-bits max key len
 			blakecb.update(round.digest());
 			var ecbkey = blakecb.digest();
+			
+			var round = new BLAKE2s();
+			round.update(StringToUint8(fullkey));
+			round.update(StringToUint8(fullkey));
+			var blakeaontecb = new BLAKE2s(8); //aont key len
+			blakeaontecb.update(round.digest());
+			var ecbaontkey = blakeaontecb.digest();
+			
 			var blakecbc = new BLAKE2s(7); //56-bits max key len
 			blakecbc.update(StringToUint8(fullkey));
 			var cbckey = blakecbc.digest();
-			
-			bfEcb = new Blowfish(ecbkey);
-			bfCbc = new Blowfish(cbckey, "cbc");
+
+			var round = new BLAKE2s();
+			round.update(StringToUint8(fullkey));
+			round.update(StringToUint8(fullkey));			
+			round.update(StringToUint8(fullkey));
+			var blakeaontcbc = new BLAKE2s(8); //aont key len
+			blakeaontcbc.update(round.digest());
+			var cbcaontkey = blakeaontcbc.digest();
+		
+			bfEcb = new Blowfish(ecbkey, ecbaontkey);
+			bfCbc = new Blowfish(cbckey, cbcaontkey, "cbc");
 			myuid = btoa(bfEcb.encrypt(uid));
 		
 			var bfchannel;

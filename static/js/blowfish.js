@@ -71,10 +71,11 @@
  * @param {string} [mode] режим шифрования
  * @author Alexandr Gorlov <a.gorlov@gmail.com>
  */
-var Blowfish = function(key, mode) {
+var Blowfish = function(key, aont_key, mode) {
 
   // инициализация пароля
   this.key = key;
+  this.aont_key = aont_key;
 
   // инициализация режима шифрования
   if (mode === "ecb" || mode === "cbc") {
@@ -187,6 +188,25 @@ Blowfish.prototype = {
     throw new Error("Неизвестный режим шифрования.");
   },
 
+    
+  hashWithKey: function(cntr, aont_key) {
+	  var n = new BLAKE2s(8, aont_key);
+	  var hash_cntr = this.block32_tou8(0, cntr);
+	  n.update(hash_cntr); //cntr update for hash
+	  return this.splitu8_64by32(n.digest());
+  },
+
+  hashWithPrev: function(cntr, prevBlock, prevHash) {
+	  var h = new BLAKE2s(8); //default key here
+      var hash_cntr = this.block32_tou8(0, cntr);
+	  var val = this.xor_with_u8(prevBlock, hash_cntr);
+	  h.update(this.block32_tou8(val[0], val[1])); //cntr update for hash
+	  var hash = h.digest();
+	  var newHash = this.xor_with_u8(prevHash, hash);
+	  return newHash;
+  },
+
+  
   /**
    * Шифрует в режиме ECB
    * (приватный метод)
@@ -196,12 +216,18 @@ Blowfish.prototype = {
   encryptECB: function(string) {
     string = this.utf8Decode(string);
     var blocks = Math.ceil(string.length/8);
+	
+	var aont_key = this.aont_key;
 
     //1. разбить строку на 8-байтные блок-и
     //2. разбить 8байтные блоки на 32-битные пары xL, xR
     //3. зашифровать все блоки
     //4. преобразовать результат в строку
+	
+	//console.log("TX ECB aont key " + aont_key);
 
+	var messageHash = new Uint32Array([0,0]);
+	
     var encryptedString = "";
     for (var i = 0; i < blocks; i++) {
       var block = string.substr(i * 8, 8);
@@ -218,13 +244,35 @@ Blowfish.prototype = {
       xL = xLxR[0];
       xR = xLxR[1];
 
+	  //aont support
+	  var axor = this.hashWithKey(i+1, aont_key);
+	  
+	  //xor XL and XR with aont xors
+	  xL = this.xor(xL, axor[0]);
+	  xR = this.xor(xR, axor[1]);
+	
+	  //continue with encrypt
       //[xL, xR] = this.encipher(xL, xR); не работает в IE, Chrome
       xLxR = this.encipher(xL, xR);
       xL = xLxR[0];
       xR = xLxR[1];
+	  
+	  //update aont last message block
+	  var updatedHash = this.hashWithPrev(i+1, xLxR, messageHash);
+	  messageHash[0] = updatedHash[0];
+	  messageHash[1] = updatedHash[1];
+
       encryptedString += this.num2block32(xL) + this.num2block32(xR);
     }
-
+	
+	//xor with aont key
+	var finalHash = this.xor_with_u8(messageHash, aont_key);
+	
+	// finally add lastMessageString
+	var lastMessageString = this.num2block32(finalHash[0]) + this.num2block32(finalHash[1]);
+	//console.log("TX ECB Aont block " + lastMessageString + " len " + lastMessageString.length);
+	encryptedString += lastMessageString;
+	
     return encryptedString;
   },
 
@@ -257,7 +305,13 @@ Blowfish.prototype = {
     var encryptedString = "";
 	var prevBlock = null;
 	var nonEvenCnt = 0;
-    for (var i = 0; i < blocks; i++) {
+	var aont_key = this.aont_key;
+	
+	var messageHash = new Uint32Array([0, 0]);
+	
+	//console.log("TX aont key " + aont_key);
+	
+	for (var i = 0; i < blocks; i++) {
       var block = string.substr(i * 8, 8);
       if (block.length < 8) {
 		 // CTS
@@ -272,10 +326,46 @@ Blowfish.prototype = {
       xLxR = this.split64by32(block);
       xL = xLxR[0];
       xR = xLxR[1];
-
+	  
+	  //aont support
+	  var axor = this.hashWithKey(i+1, aont_key);
+	  
+	  //do not xor over zero block
+	  switch(nonEvenCnt) {
+		case 1:
+			axor[1] &= 0xffffff00;
+			break;
+		case 2:
+			axor[1] &= 0xffff0000;
+			break;
+		case 3:
+			axor[1] &= 0xff000000;
+			break;
+		case 4:
+			axor[1]  = 0;
+			break;
+		case 5:
+			axor[0] &= 0xffffff00;
+			axor[1]  = 0;
+			break;
+		case 6:
+			axor[0] &= 0xffff0000;
+			axor[1]  = 0;
+			break;
+		case 7:
+			axor[0] &= 0xff000000;
+			axor[1]  = 0;
+			break;
+	  }
+	  
+	  //xor XL and XR with aont xors
+	  xL = this.xor(xL, axor[0]);
+	  xR = this.xor(xR, axor[1]);
+	
+	  //continue with encrypt
       xL = this.xor(xL, ivL);
-      xR = this.xor(xR, ivR);
-
+      xR = this.xor(xR, ivR); 
+	  
       xLxR = this.encipher(xL, xR);
 	  xL = xLxR[0];
       xR = xLxR[1];
@@ -285,6 +375,11 @@ Blowfish.prototype = {
 
 	  if(prevBlock) {
 		if(0 == nonEvenCnt) {
+			//update aont last message block
+			var updatedHash = this.hashWithPrev(i, prevBlock, messageHash);
+			messageHash[0] = updatedHash[0];
+			messageHash[1] = updatedHash[1];
+			
 			// add full previous block
 			encryptedString += this.num2block32(prevBlock[0]) + this.num2block32(prevBlock[1]);
 		}
@@ -322,13 +417,36 @@ Blowfish.prototype = {
 					eStr += String.fromCharCode(prevBlock[1] << 16 >>> 24);
 					break;
 			}
+
+			var nblock = eStr;
+			var count = 8-nblock.length;
+			while (0 < count--) {
+				nblock += "\0";
+			}			
+			//update aont last message block
+			var updatedHash = this.hashWithPrev(i, this.split64by32(nblock), messageHash);
+			messageHash[0] = updatedHash[0];
+			messageHash[1] = updatedHash[1];
+			//console.log("Last message hash for prev " + lastMessageHash);
+			
 			encryptedString += eStr;
 		}
 	  }
 	  prevBlock = xLxR;
     }
-	// finally add the last block
+	
+	var updatedHash = this.hashWithPrev(i, prevBlock, messageHash);
+	messageHash[0] = updatedHash[0];
+	messageHash[1] = updatedHash[1];
+	
+	//xor with aont key
+	var finalHash = this.xor_with_u8(messageHash, aont_key);
+	
+	// finally add the last block and lastMessageString
 	encryptedString += this.num2block32(prevBlock[0]) + this.num2block32(prevBlock[1]);
+	var lastMessageString = this.num2block32(finalHash[0]) + this.num2block32(finalHash[1]);
+	//console.log("Aont block " + lastMessageString + " len " + lastMessageString.length);
+	encryptedString += lastMessageString;
 	
     return encryptedString;
   },
@@ -341,8 +459,30 @@ Blowfish.prototype = {
    * @return {string} зашифрованная строка
    */
   decryptECB: function(string) {
-    var blocks = Math.ceil(string.length/8);
+    var blocks = Math.ceil(string.length/8)-1;
 
+    //find out last block
+	var aont_block = string.substr(string.length - 8);
+	//console.log("ECB Aont block " + aont_block + " len " + aont_block.length);
+	var messageHash = new Uint32Array([0, 0]);
+	string = string.substr(0, string.length - 8);
+	
+	//find out aont key based on full encrypted string
+	for (var i = 0; i < blocks; i++) {
+			var block = string.substr(i * 8, 8);
+			var barr = this.split64by32(block);
+			
+			var updatedHash = this.hashWithPrev(i+1, barr, messageHash);
+			messageHash[0] = updatedHash[0];
+			messageHash[1] = updatedHash[1];
+	}
+	//xor aont block with hash
+	var lastAontBlock = this.split64by32(aont_block);
+	messageHash[0] = this.xor(messageHash[0], lastAontBlock[0]);
+	messageHash[1] = this.xor(messageHash[1], lastAontBlock[1]);
+	var aont_key = this.block32_tou8(messageHash[0], messageHash[1]);
+    //console.log("Original ECB aont key " + this.block32_tou8(akey[0], akey[1]));
+	
     var decryptedString = "";
     for (var i = 0; i < blocks; i++) {
       var block = string.substr(i * 8, 8);
@@ -358,7 +498,14 @@ Blowfish.prototype = {
       xLxR = this.decipher(xL, xR);
       xL = xLxR[0];
       xR = xLxR[1];
-
+	  
+	  //aont support
+	  var axor = this.hashWithKey(i+1, aont_key);
+	  	
+	  //xor XL and XR with aont xors
+	  xL = this.xor(xL, axor[0]);
+	  xR = this.xor(xR, axor[1]);
+			
       decryptedString += this.num2block32(xL) + this.num2block32(xR);
     }
 
@@ -366,7 +513,6 @@ Blowfish.prototype = {
     return decryptedString;
   },
 
-  
   /**
    * Шифрует в режиме CBC
    * (приватный метод)
@@ -377,14 +523,53 @@ Blowfish.prototype = {
    */
   decryptCBC: function(string, iv) {
 
-    var blocks = Math.ceil(string.length/8);
+    var blocks = Math.ceil(string.length/8) - 1;
 
     var ivL, ivR, ivLtmp, ivRtmp, ivLivR;
 
     //ivLivR = this.split64by32(iv);
     ivL = iv[0];
     ivR = iv[1];
-
+	
+	//find out last block
+	var aont_block = string.substr(string.length - 8);
+	//console.log("Aont block " + aont_block + " len " + aont_block.length);
+	var messageHash = new Uint32Array([0, 0]);
+	string = string.substr(0, string.length - 8);
+	
+	var nonEvenCnt = string.length % 8;
+	//console.log("nonEvenCnt ", nonEvenCnt);
+	
+	//find out aont key based on full encrypted string
+	for (var i = 0; i < blocks; i++) {
+			var block;
+			if(i == blocks - 2 && nonEvenCnt) {
+				block = string.substr((i*8), 8 - (8-nonEvenCnt));
+				var count = 8 - block.length;
+				while (0 < count--) {
+					block += "\0";
+				}
+			}
+			else if(i == blocks - 1 && nonEvenCnt) {
+				block = string.substr((i*8)-(8-nonEvenCnt), 8);
+			}
+			else {
+			    block = string.substr(i * 8, 8);
+			}
+			
+			var barr = this.split64by32(block);
+			
+			var updatedHash = this.hashWithPrev(i+1, barr, messageHash);
+			messageHash[0] = updatedHash[0];
+			messageHash[1] = updatedHash[1];
+	}
+	//xor aont block with hash
+	var lastAontBlock = this.split64by32(aont_block);
+	messageHash[0] = this.xor(messageHash[0], lastAontBlock[0]);
+	messageHash[1] = this.xor(messageHash[1], lastAontBlock[1]);
+	var aont_key = this.block32_tou8(messageHash[0], messageHash[1]);
+    //console.log("Original aont key " + this.block32_tou8(akey[0], akey[1]));
+	
     var decryptedString = "";
     for (var i = 0; i < blocks; i++) {
       var block = string.substr(i * 8, 8);
@@ -397,6 +582,7 @@ Blowfish.prototype = {
 
 			// decipher lastblock
 			var padsize = 8 - nextBlock.length;
+			//console.log("Padsize " + padsize);
 			var datasize = nextBlock.length;
 			
 			//fix the last block and decipher
@@ -463,9 +649,18 @@ Blowfish.prototype = {
 			xL = xLxR[0];
 			xR = xLxR[1];
 
+			//console.log("RX block after decryption " + xL + "," + xR);
+			
 			xL = this.xor(xL, ivL);
 			xR = this.xor(xR, ivR);
-
+		
+			//aont support
+			var axor = this.hashWithKey(i+1, aont_key);
+			
+			//xor XL and XR with aont xors
+			xL = this.xor(xL, axor[0]);
+			xR = this.xor(xR, axor[1]);
+			
 			ivL = ivLtmp;
 			ivR = ivRtmp;
 			
@@ -475,8 +670,18 @@ Blowfish.prototype = {
 			xL = xLxR_last[0];
 			xR = xLxR_last[1];
 			
+			//console.log("RX block after decryption " + xL + "," + xR);
+			
 			xL = this.xor(xL, ivL);
 			xR = this.xor(xR, ivR);
+
+			//aont support
+			var axor = this.hashWithKey(i+2, aont_key);
+			//console.log("RX Xor hash " + axor);
+			
+			//xor XL and XR with aont xors
+			xL = this.xor(xL, axor[0]);
+			xR = this.xor(xR, axor[1]);
 			
 			//strip padding
 			var lastString = this.num2block32(xL) + this.num2block32(xR);
@@ -499,18 +704,28 @@ Blowfish.prototype = {
       xLxR = this.decipher(xL, xR);
       xL = xLxR[0];
       xR = xLxR[1];
+	  
+	  //console.log("RX block after decryption " + xL + "," + xR);
 
       xL = this.xor(xL, ivL);
       xR = this.xor(xR, ivR);
+		  
+	  //aont support
+	  var axor = this.hashWithKey(i+1, aont_key);
 
+	  //xor XL and XR with aont xors
+	  xL = this.xor(xL, axor[0]);
+	  xR = this.xor(xR, axor[1]);
+	
       ivL = ivLtmp;
       ivR = ivRtmp;
       decryptedString += this.num2block32(xL) + this.num2block32(xR);
     }
-
+	
     decryptedString = this.utf8Encode(decryptedString);
     return decryptedString;
   },
+
 
   /**
    * Функция F
@@ -698,6 +913,28 @@ Blowfish.prototype = {
       block32.charCodeAt(3)
       );
   },
+  
+  blocku8_32toNum: function(blocku832) {
+    return this.fixNegative(
+      blocku832[0] << 24 |
+      blocku832[1] << 16 |
+      blocku832[2] << 8 |
+      blocku832[3]
+      );
+  },
+  
+  block32_tou8: function(u32l, u32r) {
+	var a = new Uint8Array(8);
+	a[0] = u32l >> 24;
+	a[1] = u32l >> 16 & 0xff;
+	a[2] = u32l >> 8 & 0xff;
+	a[3] = u32l & 0xff;
+	a[4] = u32r >> 24;
+	a[5] = u32r >> 16 & 0xff;
+	a[6] = u32r >> 8 & 0xff;
+	a[7] = u32r & 0xff;
+	return a;
+  },
 
   /**
    * Преобразует 32битное число в строку (4 байта)
@@ -719,6 +956,20 @@ Blowfish.prototype = {
    */
   xor: function(a, b) {
     return this.fixNegative(a ^ b);
+  },
+  
+  /**
+   * Операция XOR u8array
+   * @param {Array} a
+   * @param {u8array} b
+   * @return {Array}
+   */
+  xor_with_u8: function(a, b) {
+	var lxor1 = b.subarray(0, 4);
+	var lxor2 = b.subarray(4, 8);
+	var ll = this.fixNegative(a[0] ^ this.blocku8_32toNum(lxor1));
+	var lr = this.fixNegative(a[1] ^ this.blocku8_32toNum(lxor2));
+	return [ll, lr];
   },
 
   /**
@@ -756,6 +1007,13 @@ Blowfish.prototype = {
     var xR = block64.substring(4, 8);
 
     return [this.block32toNum(xL) , this.block32toNum(xR)];
+  },
+  
+  splitu8_64by32: function (blocku8_64) {
+    var xL = blocku8_64.subarray(0, 4);
+    var xR = blocku8_64.subarray(4, 8);
+
+    return [this.blocku8_32toNum(xL) , this.blocku8_32toNum(xR)];
   },
 
   /**
