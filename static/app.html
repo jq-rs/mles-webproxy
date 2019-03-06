@@ -44,7 +44,7 @@
 <p>There are some ideas for new features, which include:</p>
 <ul><li>The possibility to join and follow several channels</li><li>Better battery management with JobScheduler</li></ul>
 
-<p>Please give feedback about these features (or something else) on Reddit <a href="https://www.reddit.com/r/mles/">/r/mles</a> channel.</p>
+<p>Please give feedback about these features (or something else) on Reddit <a href="http://www.reddit.com/r/mles/">/r/mles</a> channel.</p>
 
 <h2>Frequently Asked Questions</h2>
 
@@ -59,10 +59,7 @@
 <h4>How are the messages secured?</h4>
 
 <p>All messages are secured with symmetrical Blowfish with max key length of 56-bits with CTS+AONT and Blake2 HMAC. Messages can be opened easily only by the channel users who have the channel name and the key available. These security measures will not protect messages from serious decryption efforts, if messages are obtained by a 3rd party. The Mles-Websocket server, which forwards messages on the selected channel, is not aware of the key used on the channel.</p>
-
-<h4>My connection is reset from time to time when I am using Virtual Private Network (VPN). What can I do?</h4>
-
-<p>In case you are using MlesTalk application on VPN, it is known to cause issues on some cases. Please try without VPN to verify that your internet connection is ok. Please contact your VPN supplier if the problem persists. ProtonVPN is known to work fine.</p>
+<p>Regarding security, <a href="https://sweet32.info/">Sweet32 birthday attack</a> is the worst known attack at the moment against strong block ciphers with 56-bit key size. It needs several hundreds of GBs of traffic to be effective. Thus, it does not really apply for a lightweight messenger without application level keepalives.</p> 
 
 <h4>I cannot log into channel with the same user name twice, i.e from the web GUI. What can I do?</h4>
 
