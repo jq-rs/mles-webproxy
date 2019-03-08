@@ -40,12 +40,7 @@
 
 <p>Mles.io will always run the latest released open source version of the Mles-Websocket server service called <a href="https://github.com/jq-rs/arki-server">arki-server</a> and it does not collect any information of MlesTalk application users. Application code is also open sourced under <i>arki-server</i> through the WebUI. The users are always welcome to review the source code of <i>arki-server</i> and establish their own Mles-Websocket server service. Please see <a href="http://mles.io/legal">http://mles.io/legal</a> for the full Privacy Notice and other legal information.</p> 
 
-<h2>Future development</h2>
-
-<p>There are some ideas for new features, which include:</p>
-<ul><li>The possibility to join and follow several channels</li><li>Better battery management with JobScheduler</li></ul>
-
-<p>Please give feedback about these features (or something else) on Reddit <a href="http://www.reddit.com/r/mles/">/r/mles</a> channel.</p>
+<p>Please see Reddit <a href="http://www.reddit.com/r/mles/">/r/mles</a> channel for general discussion around Mles.</p>
 
 <h2>Frequently Asked Questions</h2>
 
@@ -60,7 +55,7 @@
 <h4>How are the messages secured?</h4>
 
 <p>All messages are secured with symmetrical Blowfish with max key length of 56-bits with CTS+AONT and Blake2 HMAC. Messages can be opened easily only by the channel users who have the channel name and the key available. These security measures will not protect messages from serious decryption efforts, if messages are obtained by a 3rd party. The Mles-Websocket server, which forwards messages on the selected channel, is not aware of the key used on the channel.</p>
-<p>56-bit key size equals 72,057,594,037,927,936 possible keys. As Blowfish is designed to have large initialization delay, the 56-bit key size combined with AONT guarantees lightweight security for messaging. In practice, this should mean that brute force decryption efforts without special arrangements take long enough that it is not feasible choice for a possible attacker.</p>
+<p>56-bit key size equals 72,057,594,037,927,936 possible keys. As Blowfish is designed to have large initialization delay, the 56-bit key size combined with AONT guarantees lightweight security for messaging. In practice, this should mean that brute force decryption efforts without special arrangements take long enough that it is not a feasible choice for a possible attacker.</p>
 <p>Considering block size, <a href="https://sweet32.info/">Sweet32 birthday attack</a> is the worst known attack at the moment against block ciphers with 64-bit block size. It needs several hundreds of GBs of traffic to be effective. Thus, it does not really apply for a messenger without application level keepalives, like MlesTalk.</p> 
 
 <h4>I cannot log into channel with the same user name twice, i.e from the web GUI. What can I do?</h4>
