@@ -24,14 +24,15 @@
 <p><a href="https://play.google.com/store/apps/details?id=io.mles.mlestalk"><img src="https://play.google.com/intl/en_us/badges/images/generic/en_badge_web_generic.png" width="300" alt="MlesTalk at Google Play" /></a></p>
 
 <h2>About MlesTalk application</h2>
-<p>MlesTalk is an open source real-time messenger between two or more users on a same channel. Instead of just seeing the finalized messages, see how others on the same channel write their messages, character by character. Avoid centralized services, have the freedom to pick freely the server to connect to.</p>
+<p>MlesTalk is an open source real-time messenger between two or more users on a same channel. Instead of just seeing the finalized messages, see how others on the same channel write their messages, character by character. Avoid centralized large corporation services, have the freedom to pick freely the server to connect to, or run your own.</p>
 
-<p>In addition to username and channel, you'll need to pick a shared key with other channel users. The key provides lightweight security for the messages on the channel.</p>
+<p>In addition to username and channel, you'll need to pick a shared key with other channel users. The key provides lightweight end-to-end security for the messages on the channel.</p>
 
 <p>Retro-feeling for those Unix-era users who have used the magnificent Talk program.</p>
 
 <p>Connectivity is based on open Mles-Websocket protocol. Please see <a href="http://mles.io">http://mles.io</a> for more information.</p>
 
+<p>MlesTalk is an open source project. Application UI is source code is available <a href="https://github.com/jq-rs/mlestalk-ui">here</a>. Mles-protocol based messaging webworker is available <a href="https://github.com/jq-rs/mles-webworker">here</a>. A sincere thank you to all open source developers, without you this application would not exist!</p>
 
 <h2>About Mles.io server</h2>
 
@@ -59,7 +60,8 @@
 <h4>How are the messages secured?</h4>
 
 <p>All messages are secured with symmetrical Blowfish with max key length of 56-bits with CTS+AONT and Blake2 HMAC. Messages can be opened easily only by the channel users who have the channel name and the key available. These security measures will not protect messages from serious decryption efforts, if messages are obtained by a 3rd party. The Mles-Websocket server, which forwards messages on the selected channel, is not aware of the key used on the channel.</p>
-<p>Regarding security, <a href="https://sweet32.info/">Sweet32 birthday attack</a> is the worst known attack at the moment against block ciphers with 64-bit block size. It needs several hundreds of GBs of traffic to be effective. Thus, it does not really apply for a lightweight messenger without application level keepalives.</p> 
+<p>56-bit key size equals 72,057,594,037,927,936 possible keys. As Blowfish is designed to have large initialization delay, the 56-bit key size combined with AONT guarantees lightweight security for messaging. In practice, this should mean that brute force decryption efforts without special arrangements take long enough that it is not feasible choice for a possible attacker.</p>
+<p>Considering block size, <a href="https://sweet32.info/">Sweet32 birthday attack</a> is the worst known attack at the moment against block ciphers with 64-bit block size. It needs several hundreds of GBs of traffic to be effective. Thus, it does not really apply for a messenger without application level keepalives, like MlesTalk.</p> 
 
 <h4>I cannot log into channel with the same user name twice, i.e from the web GUI. What can I do?</h4>
 
