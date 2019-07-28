@@ -21,7 +21,7 @@ extern crate tokio_io;
 use tokio_core::net::{TcpListener};
 use futures::{Stream, Future, Sink};
 use futures::future::{FutureResult, ok};
-use futures::sync::mpsc::{unbounded, UnboundedSender, UnboundedReceiver};
+use futures::sync::mpsc::{unbounded, UnboundedSender};
 use bytes::BytesMut;
 
 use tk_http::{Status};
@@ -34,7 +34,6 @@ use tk_listen::ListenExt;
 
 use std::{env};
 use std::io::{self, Read};
-use std::thread;
 use std::time::Duration;
 
 use tokio_core::reactor::Core;
@@ -176,6 +175,7 @@ fn main() {
     let listener = TcpListener::bind(&addr, &lp.handle()).unwrap();
     let cfg = Config::new().done();
     let wcfg = WebsockConfig::new().done();
+    let raddr = "127.0.0.1:8077".parse().unwrap();
 
     let done = listener.incoming()
         .sleep_on_error(Duration::from_millis(100), &lp.handle())
@@ -186,11 +186,92 @@ fn main() {
                        BufferedDispatcher::new_with_websockets(addr, &h1,
                                                                service,
                                                                move |out, inp| {
+                                                                   let handle = h2.clone();
+
+                                                                   let keyval = match env::var("MLES_KEY") {
+                                                                       Ok(val) => val,
+                                                                       Err(_) => "".to_string(),
+                                                                   };
+
+                                                                   let keyaddr = match env::var("MLES_ADDR_KEY") {
+                                                                       Ok(val) => val,
+                                                                       Err(_) => "".to_string(),
+                                                                   };
+
                                                                    let (tx, rx) = unbounded();
                                                                    let (tx_mles, rx_mles) = unbounded(); //tx is passed to Dispatcher, rx is connected to Mles server
-
                                                                    //spawn mles proxy with rx_mles here
-                                                                   thread::spawn(move || process_mles_client(tx, rx_mles));
+                                                                   let tcp = TcpStream::connect(&raddr, &handle);
+
+                                                                   let mut cid: Option<u32> = None;
+                                                                   let mut key: Option<u64> = None;
+                                                                   let mut keys = Vec::new();
+
+                                                                   let client = tcp.and_then(move |stream| {
+
+                                                                       let _val = stream.set_nodelay(true)
+                                                                           .map_err(|_| panic!("Cannot set to no delay"));
+                                                                       let _val = stream.set_keepalive(Some(Duration::new(5, 0)))
+                                                                           .map_err(|_| panic!("Cannot set keepalive"));
+                                                                       let laddr = match stream.local_addr() {
+                                                                           Ok(laddr) => laddr,
+                                                                           Err(_) => {
+                                                                               let addr = "0.0.0.0:0";
+                                                                               addr.parse::<SocketAddr>().unwrap()
+                                                                           }
+                                                                       };
+                                                                       if  !keyval.is_empty() {
+                                                                           keys.push(keyval);
+                                                                       } else {            
+                                                                           keys.push(MsgHdr::addr2str(&laddr));
+                                                                           if !keyaddr.is_empty() {
+                                                                               keys.push(keyaddr);
+                                                                           }
+                                                                       }
+                                                                       let (sink, stream) = Bytes.framed(stream).split();
+                                                                       let mles_rx = rx_mles.map_err(|_| panic!()); // errors not possible on rx XXX
+                                                                       let mles_rx = mles_rx.and_then(move |buf| { //we receive websocket packet here
+                                                                           match buf {
+                                                                               Packet::Binary(buf) => {
+                                                                                   if buf.is_empty() {
+                                                                                       return Err(StdError::new(ErrorKind::BrokenPipe, "broken pipe"));
+                                                                                   }
+                                                                                   if None == key {
+                                                                                       //create hash for verification
+                                                                                       let decoded_message = Msg::decode(buf.as_slice());
+                                                                                       keys.push(decoded_message.get_uid().to_string());
+                                                                                       keys.push(decoded_message.get_channel().to_string());
+                                                                                       key = Some(MsgHdr::do_hash(&keys));
+                                                                                       cid = Some(MsgHdr::select_cid(key.unwrap()));
+                                                                                   }
+                                                                                   let msghdr = MsgHdr::new(buf.len() as u32, cid.unwrap(), key.unwrap());
+                                                                                   let mut msgv = msghdr.encode();
+                                                                                   msgv.extend(buf);
+                                                                                   Ok(msgv)
+                                                                               },
+                                                                               _ => Ok(Vec::new())
+                                                                           }
+                                                                       });
+
+                                                                       let send_wsrx = mles_rx.forward(sink);
+                                                                       let write_wstx = stream.for_each(move |buf| {
+                                                                           let ws_tx_inner = tx.clone();
+                                                                           // send to websocket
+                                                                           let _ = ws_tx_inner.send(Packet::Binary(buf.to_vec())).wait().map_err(|err| {
+                                                                               StdError::new(ErrorKind::Other, err)
+                                                                           });              
+                                                                           Ok(())
+                                                                       });
+
+                                                                       send_wsrx
+                                                                           .map(|_| ())
+                                                                           .select(write_wstx.map(|_| ()))
+                                                                           .then(|_| Ok(()))
+                                                                   });
+                                                                   handle.spawn(client.then(move |_| {
+                                                                       println!("Connection closed");
+                                                                       Ok(())
+                                                                    }));
                                                                    //send tx to mles handler
                                                                    let rx = rx.map_err(|_| format!("stream closed"));
                                                                    Loop::server(out, inp, rx, MlesProxy(tx_mles), &wcfg, &h2)
@@ -203,95 +284,6 @@ fn main() {
     .listen(100000);
 
     lp.run(done).unwrap();
-}
-
-pub fn process_mles_client(ws_tx: UnboundedSender<Packet>, mles_rx: UnboundedReceiver<Packet>) {
-
-    let raddr = "127.0.0.1:8077".parse().unwrap();
-    let keyval = match env::var("MLES_KEY") {
-        Ok(val) => val,
-        Err(_) => "".to_string(),
-    };
-
-    let keyaddr = match env::var("MLES_ADDR_KEY") {
-        Ok(val) => val,
-        Err(_) => "".to_string(),
-    };
-
-    let mut core = Core::new().unwrap();
-    let handle = core.handle();
-    let tcp = TcpStream::connect(&raddr, &handle);
-    let mut cid: Option<u32> = None;
-    let mut key: Option<u64> = None;
-    let mut keys = Vec::new();
-
-    let client = tcp.and_then(|stream| {
-        let _val = stream.set_nodelay(true)
-                         .map_err(|_| panic!("Cannot set to no delay"));
-        let _val = stream.set_keepalive(Some(Duration::new(5, 0)))
-                         .map_err(|_| panic!("Cannot set keepalive"));
-        let laddr = match stream.local_addr() {
-            Ok(laddr) => laddr,
-            Err(_) => {
-                let addr = "0.0.0.0:0";
-                addr.parse::<SocketAddr>().unwrap()
-            }
-        };
-        if  !keyval.is_empty() {
-            keys.push(keyval);
-        } else {            
-            keys.push(MsgHdr::addr2str(&laddr));
-            if !keyaddr.is_empty() {
-                keys.push(keyaddr);
-            }
-        }
-        let (sink, stream) = Bytes.framed(stream).split();
-        let mles_rx = mles_rx.map_err(|_| panic!()); // errors not possible on rx XXX
-        let mles_rx = mles_rx.and_then(|buf| { //we receive websocket packet here
-            match buf {
-                Packet::Binary(buf) => {
-                    if buf.is_empty() {
-                        return Err(StdError::new(ErrorKind::BrokenPipe, "broken pipe"));
-                    }
-                    if None == key {
-                        //create hash for verification
-                        let decoded_message = Msg::decode(buf.as_slice());
-                        keys.push(decoded_message.get_uid().to_string());
-                        keys.push(decoded_message.get_channel().to_string());
-                        key = Some(MsgHdr::do_hash(&keys));
-                        cid = Some(MsgHdr::select_cid(key.unwrap()));
-                    }
-                    let msghdr = MsgHdr::new(buf.len() as u32, cid.unwrap(), key.unwrap());
-                    let mut msgv = msghdr.encode();
-                    msgv.extend(buf);
-                    Ok(msgv)
-                },
-                _ => Ok(Vec::new())
-            }
-        });
-
-        let send_wsrx = mles_rx.forward(sink);
-        let write_wstx = stream.for_each(move |buf| {
-            let ws_tx_inner = ws_tx.clone();
-            // send to websocket
-            let _ = ws_tx_inner.send(Packet::Binary(buf.to_vec())).wait().map_err(|err| {
-                StdError::new(ErrorKind::Other, err)
-            });              
-            Ok(())
-        });
-
-        send_wsrx
-            .map(|_| ())
-            .select(write_wstx.map(|_| ()))
-            .then(|_| Ok(()))
-    });
-
-    match core.run(client) {
-        Ok(_) => {}
-        Err(err) => {
-            println!("Error: {}", err);
-        }
-    };
 }
 struct Bytes;
 
