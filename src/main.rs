@@ -120,6 +120,11 @@ fn service<S>(req: Request, mut e: Encoder<S>)
                     let res = file.read_to_end(&mut contents);
                     let sz = res.unwrap();
                     e.status(Status::Ok);
+                    let js = filepath.find(".js");
+                    match js {
+                        Some(_) => e.add_header("Content-Type", "text/javascript").unwrap(),
+                        None => {}
+                    }
                     e.add_length(sz as u64).unwrap();
                     if e.done_headers().unwrap() {
                         e.write_body(&contents);
