@@ -62,9 +62,9 @@
 
 <h4>How are the messages secured?</h4>
 
-<p>All messages are secured with symmetrical Blowfish with max key length of 56-bits with CTS+AONT and Blake2 HMAC. Messages can be opened easily only by the channel users who have the channel name and the key available. These security measures will not protect messages from serious decryption efforts, if messages are obtained by a 3rd party. The Mles-Websocket server, which forwards messages on the selected channel, is not aware of the key used on the channel.</p>
+<p>All messages are secured with symmetrical Blowfish with max key length of 56-bits with CTS+AONT and Blake2 HMAC. Messages can be opened easily only by the channel users who have the channel name and the key available. These security measures will not protect messages from serious decryption efforts, if messages are obtained by a 3rd party. The Mles-Websocket server, which forwards messages on the selected channel, is not aware of the key used on the channel and has no dependency to the key.</p>
 <p>56-bit key size equals 72,057,594,037,927,936 possible keys. As Blowfish is designed to have large initialization delay, the 56-bit key size combined with AONT guarantees lightweight security for messaging. In practice, this should mean that brute force decryption efforts without special arrangements take long enough that it is not a feasible choice for a possible attacker.</p>
-<p>Considering block size, <a href="https://sweet32.info/">Sweet32 birthday attack</a> is the worst known attack at the moment against block ciphers with 64-bit block size. It needs several hundreds of GBs of traffic to be effective. Thus, it does not really apply to a messenger without application level keepalives, like MlesTalk.</p> 
+<p>Considering block size, <a href="https://sweet32.info/">Sweet32 birthday attack</a> is the worst known attack at the moment against block ciphers with 64-bit block size. It needs several hundreds of GBs of traffic to be effective. Thus, it does not really apply to a messenger with very limited amount of message traffic, like MlesTalk.</p> 
 
 <h4>I cannot log into channel with the same user name twice, i.e from the web GUI. What can I do?</h4>
 
