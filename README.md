@@ -17,4 +17,9 @@ Arki-server is a WebSocket proxy service for Mles protocol and especially [MlesT
  
  Enjoy talking in private!
  
- P.S. Please send a PR if some of these steps are outdated.
+ ## Current available public proxy servers
+ 
+   * http://mles.io:80
+   * \<add your public server here\>
+ 
+ P.S. Please send a PR if some of this info is outdated.
