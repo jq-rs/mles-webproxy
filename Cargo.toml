@@ -1,6 +1,6 @@
 [package]
 name = "arki-server"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["jq-rs"]
 edition = "2018"
 
