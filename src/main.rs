@@ -175,7 +175,7 @@ fn main() {
     let listener = TcpListener::bind(&addr, &lp.handle()).unwrap();
     let cfg = Config::new().done();
     let wcfg = WebsockConfig::new().ping_interval(Duration::from_millis(20000))
-                                   .inactivity_timeout(Duration::from_millis(45000))
+                                   .inactivity_timeout(Duration::from_millis(25000))
                                    .max_packet_size(0xffffff)
                                    .done();
     let raddr = "127.0.0.1:8077".parse().unwrap();
