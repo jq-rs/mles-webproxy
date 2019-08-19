@@ -1,6 +1,6 @@
 # arki-server
 
-Arki-server is a WebSocket proxy service for [Mles](https://github.com/jq-rs/mles-rs) WebSocket protocol and especially [MlesTalk Open Messenger](http://mles.io/app).
+Arki-server is an Mles WebSocket proxy service for [Mles](https://github.com/jq-rs/mles-rs) WebSocket protocol and especially [MlesTalk Open Messenger](http://mles.io/app).
 
 ## Example how to create your own personal proxy server
 
