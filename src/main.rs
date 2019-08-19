@@ -97,7 +97,6 @@ fn service<S>(req: Request, mut e: Encoder<S>)
         if e.done_headers().unwrap() {
             e.write_body(contents.as_bytes());
         }
-        /* XXX return error here? */
         return ok(e.done());
     }
 
