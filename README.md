@@ -9,7 +9,8 @@ Arki-server is a WebSocket proxy service for [Mles](https://github.com/jq-rs/mle
  3. Start mles on your local server: mles --history-limit=1000
  4. Clone arki-server repository: git clone https://github.com/jq-rs/arki-server.git
  5. Compile arki-server: cargo build --release
- 6. Startup arki-server websocket proxy in your local server: target/release/arki-server (default port 80 may need root privileges)
+ 6. Startup arki-server websocket proxy in your local server: target/release/arki-server
+     - default port 80 may need root privileges
  7. Connect to port 80 of your local server with Mles Websocket application, like [MlesTalk](http://mles.io/app).
  8. Open port 80 of your firewall for Mles WebSocket protocol, if you plan to connect from outer world.
  
