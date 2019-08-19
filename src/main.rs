@@ -1,4 +1,3 @@
-//#![feature(proc_macro)]
 extern crate tokio_core;
 extern crate futures;
 extern crate tk_bufstream;
@@ -7,16 +6,10 @@ extern crate tk_http;
 extern crate tk_listen;
 #[macro_use]
 extern crate lazy_static;
-//extern crate rusqlite;
 extern crate fnv;
 extern crate bytes;
 extern crate mles_utils;
 extern crate tokio_io;
-
-//#[macro_use]
-//extern crate tql;
-//#[macro_use]
-//extern crate tql_macros;
 
 use tokio_core::net::{TcpListener};
 use futures::{Stream, Future, Sink};
@@ -104,7 +97,7 @@ fn service<S>(req: Request, mut e: Encoder<S>)
         if e.done_headers().unwrap() {
             e.write_body(contents.as_bytes());
         }
-        /* TODO: return error here */
+        /* XXX return error here? */
         return ok(e.done());
     }
 
@@ -153,7 +146,6 @@ fn service<S>(req: Request, mut e: Encoder<S>)
 
 struct MlesProxy(UnboundedSender<Packet>);
 
-/* TODO: Add proper bindings to MlesProxy */
 impl Dispatcher for MlesProxy {
     type Future = FutureResult<(), WsErr>;
     fn frame(&mut self, frame: &Frame) -> FutureResult<(), WsErr> {
@@ -203,7 +195,7 @@ fn main() {
 
                                                                    let (tx, rx) = unbounded();
                                                                    let (tx_mles, rx_mles) = unbounded(); //tx is passed to Dispatcher, rx is connected to Mles server
-                                                                   //spawn mles proxy with rx_mles here
+
                                                                    let tcp = TcpStream::connect(&raddr, &handle);
 
                                                                    let mut cid: Option<u32> = None;
