@@ -16,7 +16,7 @@ Arki-server is a WebSocket proxy service for [Mles](https://github.com/jq-rs/mle
  
  Optional: You can configure with provided systemctl scripts the services to be started automatically on server reboot.
  
- Enjoy talking over WebSocket proxy!
+ Enjoy talking over Mles WebSocket proxy!
  
  ## Available public proxy servers
  
