@@ -336,14 +336,7 @@ function sendEmptyJoin() {
 
 function send(isFull) {
 	var message = $('#input_message').val();
-	var file = document.getElementById("input_file").files[0];
-
-	if(file) {
-		send_image(myname, mychannel, file);
-	}
-	else {
-		send_message(myname, mychannel, message, isFull);
-	}
+	send_message(myname, mychannel, message, isFull);
 }
 
 function chan_exit() {
