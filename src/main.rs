@@ -59,14 +59,17 @@ lazy_static! {
         file_map.insert("/img/sendimage.png", "static/img/sendimage.png");
         file_map.insert("/img/smallIcon.png", "static/img/smallIcon.png");
         file_map.insert("/js/Autolinker.min.js", "static/js/Autolinker.min.js");
-        file_map.insert("/js/blake2s.js", "static/js/blake2s.js");
-        file_map.insert("/js/blowfish.js", "static/js/blowfish.js");
-        file_map.insert("/js/cbor.js", "static/js/cbor.js");
+        file_map.insert("/mles-webworker/js/blake2s.js", "static/mles-webworker/js/blake2s.js");
+        file_map.insert("/mles-webworker/js/blowfish.js", "static/mles-webworker/js/blowfish.js");
+        file_map.insert("/mles-webworker/js/cbor.js", "static/mles-webworker/js/cbor.js");
+        file_map.insert("/js/mlestalk.js", "static/js/mlestalk.js");
         file_map.insert("/js/jquery-3.3.1.min.js", "static/js/jquery-3.3.1.min.js");
         file_map.insert("/js/qrcode.min.js", "static/js/qrcode.min.js");
         file_map.insert("/js/siphash.js", "static/js/siphash.js");
-        file_map.insert("/js/websocket.js", "static/js/websocket.js");
+        file_map.insert("/mles-webworker/js/webworker.js", "static/mles-webworker/js/webworker.js");
         file_map.insert("/js/zoom-vanilla.js", "static/js/zoom-vanilla.js");
+        file_map.insert("/css/zoom.css", "static/css/zoom.css");
+        file_map.insert("/css/mlestalk.css", "static/css/mlestalk.css");
         file_map
     };
 }

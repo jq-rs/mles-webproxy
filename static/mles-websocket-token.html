@@ -1,832 +1,93 @@
 <!DOCTYPE html>
+<!--
+/**
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2019 MlesTalk developers
+ */
+-->
 <html>
-<head>
-<title>Mles WebSocket Channels</title>
-<link href="css/zoom.css" rel="stylesheet">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width">
-</head>
-<script src="js/jquery-3.3.1.min.js"></script>
-<script src="js/Autolinker.min.js"></script>
-<script src="js/qrcode.min.js"></script>
-<script src="js/siphash.js"></script>
-<!-- <script src="cordova.js"></script> -->
-
-<style>
-body {
-    padding: 0;
-    margin: 0;
-}
-
-a {
-    color: #77407b;
-}
-
-.body_cont {
-    width: auto;
-    margin: 0 auto;
-    padding: 0;
-}
-
-.fuchsia {
-    color: #77407b;
-}
-
-.box_with_shadow {
-    background: #f3f4f6;
-    border: 1px solid #e4e4e4;
-    -moz-box-shadow: 0px 0px 2px 1px #e5e5e5;
-    -webkit-box-shadow: 0px 0px 2px 1px #e5e5e5;
-    box-shadow: 0px 0px 2px 1px #e5e5e5;
-}
-
-#name_channel_cont {
-    margin: 0 auto;
-    width: 350px;
-    height: 260px;
-    text-align: center;
-}
-
-#server_cont {
-    margin: 0 auto;
-    width: 350px;
-    height: 110px;
-    text-align: center;
-	display: block;
-}
-
-#name_channel_cont p {
-    font-family: sans-serif;
-    font-size: 16px;
-    color: #77407b;
-}
-
-#name_channel_cont #input_name {
-    border: 1px solid #dddddd;
-    padding: 1px;
-    width: 250px;
-    display: block;
-    margin: 0 auto;
-    outline: none;
-    font-family: sans-serif;
-}
-
-#name_channel_cont #input_channel {
-    border: 1px solid #dddddd;
-    padding: 1px;
-    width: 250px;
-    display: block;
-    margin: 0 auto;
-    outline: none;
-    font-family: sans-serif;
-}
-
-#name_channel_cont #input_key {
-    border: 1px solid #dddddd;
-    padding: 1px;
-    width: 250px;
-    display: block;
-    margin: 0 auto;
-    outline: none;
-    font-family: sans-serif;
-}
-
-#name_channel_cont #input_addr_port {
-    border: 1px solid #dddddd;
-    padding: 1px;
-    width: 250px;
-    display: block;
-    margin: 0 auto;
-    outline: none;
-    font-family: sans-serif;
-}
-
-#name_channel_cont #the_join {
-    background-color: #77407b;
-    border: none;
-    color: white;
-    padding: 8px 8px;
-    text-align: center;
-    text-decoration: none;
-    display: inline-block;
-    float: rigth;
-    width: 100px;
-    font-size: 14px;
-}
-
-#message_cont {
-    display: none;
-    width: auto;
-    margin: 8px 8px auto;
-    background: #fff;
-    padding: 1px 0 0 0;
-}
-
-#qrcode_cont {
-    display: none;
-    width: auto;
-    margin: 8px 8px auto;
-    background: #fff;
-    padding: 1px 0 0 0;
-}
-
-#messages_list {
-    margin: 10px;
-    padding: 0;
-	overflow: scroll;
-    overflow-x: hidden;
-}
-
-#messages {
-    margin: 0px;
-    padding: 0;
-    height: 230px;
-}
-
-#messages li {
-    list-style: none;
-    font-family: sans-serif;
-    font-size: 14px;
-    padding: 1px 4px;
-}
-
-#messages li.new,#messages li.exit {
-    font-style: italic;
-    color: #bbbbbe;
-}
-
-#messages li.own {
-    color: #bbbbbf;
-}
-
-#messages li span.name {
-    color: #77407b;
-}
-
-#input_message_cont {
-    margin: 10px 5px 0 5px;
-}
-
-#input_message {
-    background: #f0f0f0;
-    border: none;
-    font-size: 16px;
-    font-family: sans-serif;
-    outline: none;
-    padding: 6px;
-    float: left;
-    margin: 1;
-    -webkit-box-sizing: border-box;
-    -moz-box-sizing: border-box;    
-    box-sizing: border-box;
-    width: 100%;
-}
-
-#the_send {
-    background-color: #77407b;
-    border: none;
-    color: white;
-    padding: 8px 8px;
-    text-align: center;
-    text-decoration: none;
-    display: inline-block;
-    float: right;
-    width: 100px;
-    font-size: 14px;
-}
-
-.field > span {
-    display: block;
-    overflow: hidden;
-    padding: 0px;
-
-}
-.field input[type=text] {
-    width: 100%;
-}
-.field input[type=submit] {
-    float: right;
-}
-
-.field input[type=file] {
-    float: right;
-	display: none;
-}
-
-</style>
-<script>
-var myname = '';
-var mychannel = '';
-var myaddr = '';
-var myport = '';
-var mytoken = null;
-var addrportinput = '';
-var ownid = 0;
-var ownappend = false;
-var idhash = {};
-var idappend = {};
-
-var initOk = false;
-const RETIMEOUT = 1500; /* ms */
-const MAXTIMEOUT = 12000; /* ms */
-var reconn_timeout = RETIMEOUT;
-
-var isTokenChannel = false;
-
-var lastMessageSeenTs = 0;
-var lastMessageNotifiedTs = 0;
-var lastMessage = {};
-
-var weekday = new Array(7);
-weekday[0] = "Sun";
-weekday[1] = "Mon";
-weekday[2] = "Tue";
-weekday[3] = "Wed";
-weekday[4] = "Thu";
-weekday[5] = "Fri";
-weekday[6] = "Sat";
-
-var autolinker = new Autolinker( {
-    urls : {
-        schemeMatches : true,
-        wwwMatches    : true,
-        tldMatches    : true
-    },
-    email       : true,
-    phone       : false,
-    mention     : false,
-    hashtag     : false,
-
-    stripPrefix : true,
-    stripTrailingSlash : true,
-    newWindow   : true,
-
-    truncate : {
-        length   : 0,
-        location : 'end'
-    },
-
-    className : ''
-} );
-
-function stamptime(msgdate) {
-	var dd=msgdate.getDate(),
-	mm=msgdate.getMonth()+1,
-	yyyy=msgdate.getFullYear(),
-    h=msgdate.getHours(), 
-    m=msgdate.getMinutes(), 
-    day=weekday[msgdate.getDay()];
-	if(dd<10) dd='0'+dd;
-	if(mm<10) mm='0'+mm;
-    if(m<10) m='0'+m;
-    return dd + '.' + mm + '.' + yyyy + ' ' + day + ' ' + h + ':' + m;
-}
-
-function timenow(){
-    var now=new Date(), 
-	dd=now.getDate(),
-	mm=now.getMonth()+1,
-	yyyy=now.getFullYear(),
-    h=now.getHours(), 
-    m=now.getMinutes(), 
-    day=weekday[now.getDay()];
-	if(dd<10) dd='0'+dd;
-	if(mm<10) mm='0'+mm;
-    if(m<10) m='0'+m;
-    return dd + '.' + mm + '.' + yyyy + ' ' + day + ' ' + h + ':' + m;
-}
-
-var can_notify = false;
-var can_vibrate = false;
-var will_notify = false;
-var isCordova = false;
-
-var webWorker = new Worker('js/websocket.js');
-
-function onLoad() {
-	document.addEventListener("deviceready", function () {
-		cordova.plugins.notification.local.requestPermission(function (granted) {
-			can_notify = granted;
-		}); 
-		can_vibrate = true;
-		document.addEventListener("pause", onPause, false);
-		document.addEventListener("resume", onResume, false);
-		cordova.plugins.backgroundMode.setDefaults({
-			title: 'MlesTalk in the background',
-			text: 'Notifications active',
-		});
-		cordova.plugins.backgroundMode.on('activate', function() {
-			cordova.plugins.backgroundMode.disableWebViewOptimizations(); 
-		});
-		isCordova = true;
-	}, false);
-}
-
-
-function onPause() {
-	if(isCordova)
-		cordova.plugins.backgroundMode.enable();
-    will_notify = true;
-	lastMessageNotifiedTs = lastMessageSeenTs;
-}
-
-function onResume() {
-	will_notify = false;
-	if(isCordova) {
-		cordova.plugins.notification.local.clearAll();
-		cordova.plugins.backgroundMode.disable();
-	}
-}
-
-$(document).ready(function() {
-				  var url_string = window.location.href;
-				  var url = new URL(url_string);
-				  mytoken = url.searchParams.get("token");
-				  $("#channel_submit, #form_send_message").submit(function(e) {
-                                                                  e.preventDefault();
-                                                                  ask_channel();
-                                                                  });
-                  });
-
-			  
-function ask_channel() {
-    if ($('#input_name').val().trim().length <= 0 ||
-        mytoken == null ||
-        $('#input_key').val().trim().length <= 0 ) {
-        alert('Token, name, and shared key?');
-    } else {
-		if(mytoken != null) {
-			var token = mytoken.trim();
-			token = token.split(' ').join('+');
-			token = atob(token);
-			var atoken = token.substring(0,16);
-			var bfchannel = token.substr(16);
-			var sipkey=SipHash.string16_to_key(bfchannel);
-			var newtoken = SipHash.hash_hex(sipkey, bfchannel);
-			if(atoken != newtoken) {
-				alert('Invalid token');
-				return;
-			}
-			mychannel = btoa(bfchannel);
-			isTokenChannel = true;
-		}
-		else {
-	        mychannel = $('#input_channel').val().trim();
-		}
-
-        myname = $('#input_name').val().trim();
-        var fullkey = $('#input_key').val().trim();
-		if(myaddr == '') {
-			myaddr = 'mles.io';
-		}
-		if(myport == '') {
-			myport = '80';
-		}
-
-        $('#name_channel_cont').fadeOut(400, function() {
-										webWorker.postMessage(["init", null, myaddr, myport, myname, mychannel, fullkey, isTokenChannel]);
-										$('#message_cont').fadeIn();
-                                        });
-    }
-    return false;
-}
-
-function sendEmptyJoin() {
-	send_message(myname, mychannel, "", true);
+	<head>
+		<meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline'; style-src * 'unsafe-inline'; media-src *; img-src 'self' data:; connect-src ws://*;" />
+		<title>Mles WebSocket Channels</title>
+		<link href="css/zoom.css" rel="stylesheet">
+		<link href="css/mlestalk.css" rel="stylesheet">
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width">
+	</head>
+	<script src="js/jquery-3.3.1.min.js"></script>
+	<script src="js/Autolinker.min.js"></script>
+	<!-- <script src="js/qrcode.min.js"></script> -->
+	<script src="js/siphash.js"></script>
+	<!-- <script src="cordova.js"></script> -->
+	<script src="js/mlestalk.js"></script>
 	
-	//after reconnect, start locally from a new line
-	ownid = ownid + 1;
-	ownappend = false;
-}
+	<body onload="onLoad()">
+		<div class="body_cont">
+			<div id="name_channel_cont" class="box_with_shadow">
+				<form id="channel_submit" method="post">
+					<div style="float:right;"><select id="channel_localization" onchange="set_language();">
+						<option value="gb">🇬🇧</option>
+						<option value="es">🇪🇸</option>
+						<option value="de">🇩🇪</option>
+						<option value="fr">🇫🇷</option>
+						<option value="fi">🇫🇮</option>
+						<option value="se">🇸🇪</option>
+					</select></div><br />
+					<p>MlesTalk invitation!</p>
+					<p id="channel_user_name">Your name?</p>
+					<input type="text" id="input_name" />
+					<p id="channel_key">Shared key?</p>
+					<input type="password" id="input_key" autocomplete="off">
+					<input type="submit" value="&rarr;" id="the_join">
+					<div id="server_cont" class="box_with_shadow">
+						<p id="channel_server">Mles WebSocket server address</p>
+						<input type="text" id="input_addr_port" value="" />
+					</div>
+				</form>
+				<a href="http://mles.io/app" id="app_info">app info</a> <a href="http://mles.io/legal" id="legal">legal</a>
+			</div>
 
-function send(isFull) {
-    var message = $('#input_message').val();
-	send_message(myname, mychannel, message, isFull);
-}
+			<div id="message_cont" class="box_with_shadow">
+				<div id="messages_list">
+					<!-- <a id="qrcode_link"><div id="qrcode" style="float:right;margin:5px 5px 5px 5px;"></div></a>
+					<script type="text/javascript">
+						var qrcode = new QRCode(document.getElementById("qrcode"), {
+							text: "undefined",
+							width: 70,
+							height: 70,
+							colorDark : "#000000",
+							colorLight : "#ffffff",
+							correctLevel : QRCode.CorrectLevel.L
+						});
+					</script> -->
+					<ul id="messages">
+					</ul>
 
-function close_socket() {
-	initOk = false;
-	mytoken = null;
-	if(isCordova)
-		cordova.plugins.backgroundMode.disable();
-	alert('The connection is lost. Please try again.');
-	if(!isTokenChannel)
-		$('#qrcode').fadeOut();
-    $('#message_cont').fadeOut(400, function() {
-                               $('#name_channel_cont').fadeIn();
-							   $('#messages').html('');
-                               });
-}
+				</div>
 
-function initReconnect() {
-	reconn_timeout=RETIMEOUT;
-}
-
-var multipart_dict = {};
-var multipart_send_dict = {};
-var multipartContinue = false;
-webWorker.onmessage = function(e) {
-	var cmd = e.data[0];
-	switch(cmd) {
-		case "init":
-			var uid = e.data[1];
-			var channel = e.data[2];
-			var myuid = e.data[3];
-			var mychannel = e.data[4];
-			
-			if(uid.length > 0 && channel.length > 0) {
-				initOk = true;
-				sendEmptyJoin();
-				var li;
-				if(!isTokenChannel) {
-					li = '<li class="new"> - <span class="name">' + uid + "@" + channel + '</span> - </li>';
-				}
-				else {
-					li = '<li class="new"> - <span class="name">' + uid + '</span> - </li>';
-				}
-				$('#messages').append(li);
-			}
-					
-			if(!isTokenChannel) {
-				//use channel to create 128 bit secret key
-				var bfchannel = atob(mychannel);
-				var key=SipHash.string16_to_key(bfchannel);
-				var atoken = SipHash.hash_hex(key, bfchannel);
-				atoken = atoken + bfchannel;
-				token = btoa(atoken);		
-				document.getElementById("qrcode_link").setAttribute("href", get_token());
-			
-				qrcode.clear(); // clear the code.
-				qrcode.makeCode(get_token()); // make another code.
-				$('#qrcode').fadeIn();
-			}
-			else {
-				$('#qrcode').fadeOut();
-			}
-			if(isCordova)
-				cordova.plugins.backgroundMode.enable();
-			break;
-		case "data":
-			var uid = e.data[1];
-			var channel = e.data[2];
-			var msgTimestamp = e.data[3];
-			var message = e.data[4];
-			var isImage = e.data[5];
-			var isMultipart = e.data[6];
-			var isFirst = e.data[7];
-			var isLast = e.data[8];
-
-			var isFull = false;
-			
-			initReconnect();
-			
-			if(isMultipart) {
-				if(!multipart_dict[uid + channel]) {
-					if(!isFirst) {
-						//invalid frame
-						return;
-					}
-					multipart_dict[uid + channel] = "";
-				}
-				multipart_dict[uid + channel] += message;
-				if(!isLast) {
-					return;
-				}
-				message = multipart_dict[uid + channel];
-				multipart_dict[uid + channel] = null;
-			}
-			
-			//update hash
-			var duid = uid.split(' ').join('_');
-			if(idhash[duid] == null) {	
-				idhash[duid] = 0;
-				idappend[duid] = false;
-			}
-			
-			if(message.length > 2) {
-				if(lastMessageSeenTs < msgTimestamp) {
-					lastMessageSeenTs = msgTimestamp;
-				}
-
-				var li;
-				var now = timenow();
-				var dateString = "[" + stamptime(new Date(msgTimestamp)) + "] ";
-				if (dateString.charAt(0) == '[' && dateString.charAt(1) == now.charAt(0) && dateString.charAt(2) == now.charAt(1) &&
-					dateString.charAt(4) == now.charAt(3) && dateString.charAt(5) == now.charAt(4)) {
-					dateString = dateString.slice(16, dateString.length);
-					dateString = "[" + dateString;
-				}
-				
-				/* Check first is it a text or image */
-				if(isImage) {
-					isFull = true;
-					if (uid != myname) {
-						li = '<div id="' + duid + '' + idhash[duid] + '"><li class="new"><span class="name">' + uid + '</span> ' + dateString 
-							+ '<img class="image" src="' + message + '" height="100px" data-action="zoom" alt=""></li></div>'
-					}
-					else {
-						li = '<div id="' + duid + '' + idhash[duid] + '"><li class="own"> ' + dateString
-							+ '<img class="image" src="' + message + '" height="100px" data-action="zoom" alt=""></li></div>'
-					}
-				}
-				else {
-					if (message.charCodeAt(message.length-1) == "\n".charCodeAt(0)) {
-						isFull = true;
-					}
-					
-					if (uid != myname) {
-						li = '<div id="' + duid + '' + idhash[duid] + '"><li class="new"><span class="name"> ' + uid + '</span> '
-							+ dateString + "" + autolinker.link( message ) + '</li></div>';
-					}
-					else {
-						li = '<div id="' + duid + '' + idhash[duid] + '"><li class="own"> ' + dateString + "" + autolinker.link( message ) + '</li></div>';
-					}
-				}
-
-				if(false == idappend[duid]) {
-					$('#messages').append(li);
-					idappend[duid] = true;
-				}
-		
-				if(isFull) {
-					idhash[duid] = idhash[duid] + 1;
-					idappend[duid] = false;
-				}
-				else if(true == idappend[duid]){		
-					$('#' + duid + '' + idhash[duid]).replaceWith(li);
-				}
-
-				if(isFull || $('#input_message').val().length == 0) {
-					scrollToBottom();
-				}
-				
-				if(uid != myname && isFull && will_notify &&
-				   can_notify && lastMessageNotifiedTs < msgTimestamp) {
-					if(true == isImage) {
-						message = "<an image>";
-					}
-					do_notify(uid, channel, msgTimestamp, message);
-				}
-
-			}
-			break;
-		case "send":
-			var uid = e.data[1];
-			var channel = e.data[2];
-			var isMultipart = e.data[3];
-			if(isMultipart) {
-				if(multipart_send_dict[uid + channel]) {
-					multipartContinue = true;
-				}
-			}
-			break;
-		case "close":
-			reconnect();
-			if(initOk) {
-				var li = '<li class="new"> - <span class="name">reconnecting</span> - </li>';
-				$('#messages').append(li);
-				scrollToBottom();
-			}
-			break;
-	}
-}
-
-var notifyInProgress = false;
-async function do_notify(uid, channel, msgTimestamp, message) {
-	lastMessage[channel] = [msgTimestamp, uid, message];
-	if(notifyInProgress) {
-		return;
-	}
-	notifyInProgress = true;
-	await sleep(1000);
-	var msg = lastMessage[channel];
-	lastMessageNotifiedTs = msg[0];
-	notifyInProgress = false;
-	if(isCordova) {
-		cordova.plugins.notification.local.schedule({
-			title: msg[1],
-			text: msg[2],
-			icon: 'file://img/icon.png',
-			foreground: false,
-		});
-		if(can_vibrate) {
-			navigator.vibrate(1000);
-		}
-	}		
-}
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-async function reconnect() {
-  if(reconn_timeout > MAXTIMEOUT) {
-	reconn_timeout=RETIMEOUT;
-	close_socket();
-	return;
-  }
-  await sleep(reconn_timeout);
-  reconn_timeout *= 2;
-  webWorker.postMessage(["reconnect", null]);
-
-  
-}
-
-function scrollToBottom() {
-    messages_list.scrollTop = messages_list.scrollHeight;
-}
-
-function send_data(cmd, uid, channel, data, isImage, isMultipart, isFirst, isLast) {
-
-	if(initOk) {
-		var rarray = new Uint32Array(6);
-		window.crypto.getRandomValues(rarray);
-		/* XXX todo pass isTokenChannel as parameter */
-		webWorker.postMessage([cmd, data, uid, channel, isTokenChannel, rarray, isImage, isMultipart, isFirst, isLast]);
-	}
-}
-
-function send_message(uid, channel, message, isFull) {
-	var msglen = message.length;
-
-	if(msglen == 0)
-		message = message + "\n";
-	if(true == isFull)
-		message = message + "\n";
-	
-	send_data("send", uid, channel, message, false, false, false, false);
-
-	var dateString = "[" + timenow() + "] ";
-	var now = timenow();
-	//update own view
-	if (dateString.charAt(0) == '[' && dateString.charAt(1) == now.charAt(0) && dateString.charAt(2) == now.charAt(1) &&
-			dateString.charAt(4) == now.charAt(3) && dateString.charAt(5) == now.charAt(4)) {
-		    dateString = dateString.slice(16, dateString.length);
-			dateString = "[" + dateString;
-	}
-
-    var li = '<div id="owner' + ownid + '"><li class="own"> ' + dateString + "" + autolinker.link( message ) + '</li></div>';
-	if(isFull) {
-		ownid = ownid + 1;
-		ownappend = false;
-	}
-	else {
-	    if(false == ownappend) {
-			$('#messages').append(li);
-			ownappend = true;
-		}
-		else
-			$('#owner' + ownid).replaceWith(li);
-	}
-		
-    scrollToBottom();
- 
-	if(isFull && msglen > 0)
-		$('#input_message').val('');
-}
-
-const MULTIPART_SLICE = 1024*16;
-async function send_dataurl(dataUrl, uid, channel) {
-	var isImage = true;
-
-	if(dataUrl.length > MULTIPART_SLICE) {
-		var isMultipart = true;
-		var isFirst;
-		var isLast;
-		multipart_send_dict[uid + channel] = true;
-		for (var i = 0; i < dataUrl.length; i += MULTIPART_SLICE) {
-			isFirst = false;
-			isLast = false;
-			if(0 == i) {
-				isFirst = true;
-			}
-			else if(i + MULTIPART_SLICE >= dataUrl.length) {
-				isLast = true;
-				var data = dataUrl.slice(i, dataUrl.length);
-				send_data("send", myname, mychannel, data, isImage, isMultipart, isFirst, isLast);
-				multipart_send_dict[uid + channel] = false;
-				multipartContinue = false;
-				break;
-			}
-			var data = dataUrl.slice(i, i + MULTIPART_SLICE);
-			send_data("send", myname, mychannel, data, isImage, isMultipart, isFirst, isLast);
-			while(false == multipartContinue) {
-				await sleep(10);
-			}
-			multipartContinue = false;
-		}
-	}
-	else {
-		send_data("send", myname, mychannel, data, isImage, false, false, false); /* is not multipart */
-	}
-	
-	var dateString = "[" + timenow() + "] ";
-	var now = timenow();
-	//update own view
-	if (dateString.charAt(0) == '[' && dateString.charAt(1) == now.charAt(0) && dateString.charAt(2) == now.charAt(1) &&
-			dateString.charAt(4) == now.charAt(3) && dateString.charAt(5) == now.charAt(4)) {
-		    dateString = dateString.slice(16, dateString.length);
-			dateString = "[" + dateString;
-	}
-	
-	var li = '<div id="owner' + ownid + '"><li class="own"> ' + dateString
-				+ '<img class="image" src="' + dataUrl + '" height="100px" data-action="zoom" alt=""></li></div>'
-	$('#messages').append(li);
-	ownid = ownid + 1;
-	scrollToBottom();
-	$('#input_file').val('');	
-}
-
-
-function send_image(myname, mychannel, file) {
-	var fr = new FileReader();
-    fr.onload = function (readerEvent) {
-		if(file.size >= 512 * 1000) {
-			var imgtype = 'image/jpeg';
-            if(file.type.match('image/png')) {
-				imgtype = 'image/png';
-			}
-			//resize the image
-			var image = new Image();
-			image.onload = function (imageEvent) {
-				var canvas = document.createElement('canvas'),
-						max_size = 1024,
-						width = image.width,
-						height = image.height;
-				if (width > height) {
-					if (width > max_size) {
-						height *= max_size / width;
-						width = max_size;
-					}
-				} else {
-					if (height > max_size) {
-						width *= max_size / height;
-						height = max_size;
-					}
-				}
-				canvas.width = width;
-				canvas.height = height;
-				canvas.getContext('2d').drawImage(image, 0, 0, width, height);
-				var dataUrl = canvas.toDataURL(imgtype);
-				send_dataurl(dataUrl, myname, mychannel);
-			}
-			image.src = readerEvent.target.result;
-		}
-		else {
-			//send directly without resize
-			send_dataurl(fr.result, myname, mychannel);
-		}
-    }
-    fr.readAsDataURL(file);
-}
-
-function get_token() {
-	return "http://" + addrportinput + "/web?token=" + token;
-}
-</script>
-
-<body onload="onLoad()">
-<div class="body_cont">
-    <div id="name_channel_cont" class="box_with_shadow">
-        <form id="channel_submit" method="post">
-		<p>MlesTalk invitation!</p>
-            <p>Your name?</p>
-		    <input type="text" id="input_name" />
-            <p>Shared key?</p>
-            <input type="password" id="input_key" autocomplete="off">
-			<input type="submit" value="&rarr;" id="the_join">
-	      </form>
-		  <a href="http://mles.io/app">app info</a> <a href="http://mles.io/legal">legal</a>
-    </div>
-
-    <div id="message_cont" class="box_with_shadow">
-		<div id="messages_list">
-			<a id="qrcode_link"><div id="qrcode" style="float:right;margin:5px 5px 5px 5px;"></div></a>
-			<script type="text/javascript">
-				var qrcode = new QRCode(document.getElementById("qrcode"), {
-					text: "undefined",
-					width: 70,
-					height: 70,
-					colorDark : "#000000",
-					colorLight : "#ffffff",
-					correctLevel : QRCode.CorrectLevel.L
-				});
-			</script>
-			<ul id="messages">
-			</ul>
-
+				<div id="input_message_cont">
+					<form id="form_send_message" method="post" action="#">
+						<div class="field">
+							<label for="input_file">
+								<img src="img/sendimage.png" style="float:right;height:35px;" />
+							</label>
+							<input id="input_file" type="file" onchange="send(true);" accept="image/*"  />
+							<input type="submit" id="the_send" onclick="send(true);" value="&#9166;" />
+							<span><input type="text" id="input_message" oninput="send(false);" autocomplete="off" autofocus /></span>
+							<br />
+						</div>
+					</form>
+				</div>
+				<div class="field">
+					<form>
+						<input id="channel_exit" class="exit_button" type="button" value="exit" onclick="chan_exit()" />
+					</form>
+				</div>
+			</div>
 		</div>
-
-        <div id="input_message_cont">
-            <form id="form_send_message" method="post" action="#">
-                <div class="field">
-                <input type="submit" id="the_send" onclick="send(true);" value="&#9166;" />
-				<span><input type="text" id="input_message" oninput="send(false);" autocomplete="off" autofocus /></span>
-                </div>
-            </form>
-        </div>
-    </div>	
-</div>
-<script src="js/zoom-vanilla.js"></script>
-</body>
+		<script src="js/zoom-vanilla.js"></script>
+	</body>
 </html>

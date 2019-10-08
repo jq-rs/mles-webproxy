@@ -1,13 +1,28 @@
+/**
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ *
+ * Copyright (c) 2019 MlesTalk WebWorker developers
+ */
+
 importScripts('cbor.js', 'blake2s.js', 'blowfish.js');
 
 var webSocket;
-var	myaddr;
-var	myport;
-var	myuid;
-var	mychannel;
+var myaddr;
+var myport;
+var myuid;
+var mychannel;
 var ecbkey;
+const SCATTERSIZE = 15;
+const ISFULL  = 0x8000
+const ISIMAGE = 0x4000;
+const ISMULTI = 0x4000;
+const ISFIRST = 0x2000;
+const ISLAST  = 0x1000;
+const BEGIN = new Date(Date.UTC(2018, 0, 1, 0, 0, 0));
 
-function scatterTime(rvalU32, valU32, timeU14)
+function scatterTime(rvalU32, valU32, timeU15)
 {
 	//check first which bits to use
 	var numofones = 0;
@@ -19,7 +34,7 @@ function scatterTime(rvalU32, valU32, timeU14)
 			numofones++;
 		}
 	}
-	var timeslot = 14;
+	var timeslot = SCATTERSIZE;
 	if(numofones <= timeslot)
 		isOnes = false;	
 	for (var i = 31; i >= 0; i--) {
@@ -27,12 +42,12 @@ function scatterTime(rvalU32, valU32, timeU14)
 		if((isOnes && bit[0] > 0) || (false == isOnes && 0 == bit[0])) {
 			var tbit = new Uint32Array(1);
 			//apply setting to next item
-			tbit[0] = (timeU14 & (1 << timeslot)) >> timeslot;
+			tbit[0] = (timeU15 & (1 << timeslot)) >> timeslot;
 			if(tbit[0] > 0) {
-				valU32 = valU32 | (1 << i);
+				valU32 |= (1 << i);
 			}
 			else {
-				valU32 = valU32 & ~(1 << i);				
+				valU32 &= ~(1 << i);				
 			}
 			timeslot--;
 			if(timeslot < 0)
@@ -46,7 +61,7 @@ function unscatterTime(rvalU32, svalU32)
 {
 	//check first which bits to use
 	var numofones = 0;
-	var timeU14 = new Uint32Array(1);
+	var timeU15 = new Uint32Array(1);
 	var isOnes = true;
 	for (var i = 31; i >= 0; i--) {
 		var bit = new Uint32Array(1);
@@ -55,7 +70,7 @@ function unscatterTime(rvalU32, svalU32)
 			numofones++;
 		}
 	}
-	var timeslot = 14;
+	var timeslot = SCATTERSIZE;
 	if(numofones <= timeslot)
 		isOnes = false;	
 	for (var i = 31; i >= 0; i--) {
@@ -65,31 +80,31 @@ function unscatterTime(rvalU32, svalU32)
 			var sbit = new Uint32Array(1);
 			sbit[0] = (svalU32 & (1 << i)) >> i;
 			if(sbit[0] > 0)
-				timeU14[0] = timeU14[0] | (1 << timeslot);
+				timeU15[0] |= (1 << timeslot);
 			timeslot--;
 			if(timeslot < 0)
 				break;
 		}
 	}
-	return timeU14[0];
+	return timeU15[0];
 }
 
 function createTimestamp(weekstamp) {
-	var begin = new Date(Date.UTC(2018, 0, 1, 0, 0, 0));
+	var begin = BEGIN;
 	var this_week = new Date(begin.valueOf() + weekstamp*1000*60*60*24*7);
 	var timestamp = parseInt((Date.now() - this_week)/1000/60);
 	return timestamp;
 }
 
 function createWeekstamp() {
-	var begin = new Date(Date.UTC(2018, 0, 1, 0, 0, 0));
+	var begin = BEGIN;
 	var now = new Date(Date.now());
 	var weekstamp = parseInt((now - begin)/1000/60/60/24/7);
 	return weekstamp;
 }
 
 function readTimestamp(timestamp, weekstamp) {
-	var begin = new Date(Date.UTC(2018, 0, 1, 0, 0, 0));
+	var begin = BEGIN;
 	var weeks = new Date(begin.valueOf() + weekstamp*1000*60*60*24*7);
 	var extension = timestamp * 1000 * 60;	
 	var time = new Date(weeks.valueOf() + extension);
@@ -126,8 +141,8 @@ function u8arr2iv(ivm) {
 }
 
 function load32(a, i) {
-    return (a[i + 0] & 0xff) | ((a[i + 1] & 0xff) << 8) |
-           ((a[i + 2] & 0xff) << 16) | ((a[i + 3] & 0xff) << 24);
+	return (a[i + 0] & 0xff) | ((a[i + 1] & 0xff) << 8) |
+		((a[i + 2] & 0xff) << 16) | ((a[i + 3] & 0xff) << 24);
 }
 
 function store32(a, i, val) {
@@ -139,11 +154,11 @@ function store32(a, i, val) {
 } 
 
 function StringToUint8(str) {
-    var arr = new Uint8Array(str.length);
+	var arr = new Uint8Array(str.length);
 	var len = str.length;
-    for (var i=0; i < len; i++) {
-        arr[i] = str.charCodeAt(i);
-    }
+	for (var i=0; i < len; i++) {
+		arr[i] = str.charCodeAt(i);
+	}
 	return arr;
 }
 
@@ -154,44 +169,39 @@ function Uint8ToString(arr) {
 	};
 	return str;
 }
- 
-onmessage = function(e) {
-    var msg = CBOR.decode(e.data);
-	var iv = msg.message.slice(0,8);
-	var arr = msg.message.slice(8,msg.message.byteLength-8);
-	var hmac = msg.message.slice(msg.message.byteLength-8, msg.message.byteLength)
-	var message = Uint8ToString(arr);
-	postMessage([msg.uid, msg.channel, iv, message, hmac]);
-}
 
 function open_socket(myport, myaddr, uid, channel) {
-    if (webSocket !== undefined && webSocket.readyState !== WebSocket.CLOSED) {
-        return;
-    }
-	
-	WebSocket.pluginOptions = {
-		maxConnectTime: 5000,
-		override: false
-	};
-	
-    webSocket = new WebSocket("ws://" + myaddr + ":" + myport
-                              + "?myname=" + uid
-                              + "&mychannel=" + channel, "mles-websocket");
-    webSocket.binaryType = "arraybuffer";
-    webSocket.onopen = function(event) {
+	if (webSocket !== undefined && webSocket.readyState == WebSocket.OPEN) {
+		return;
+	}
+
+	webSocket = new WebSocket("ws://" + myaddr + ":" + myport
+		+ "?myname=" + uid
+		+ "&mychannel=" + channel, "mles-websocket");
+	webSocket.binaryType = "arraybuffer";
+	webSocket.onopen = function(event) {
 		var uid = bfEcb.trimZeros(bfEcb.decrypt(atob(myuid)));
 		var channel = bfEcb.trimZeros(bfEcb.decrypt(atob(mychannel)));	
 		postMessage(["init", uid, channel, myuid, mychannel]);
-    };
+	};
 
-    webSocket.onmessage = function(event) {
-        if(event.data) {			
-			var msg = CBOR.decode(event.data);
+	webSocket.onmessage = function(event) {
+		if(event.data) {
+			var msg;
+			try {
+				msg = CBOR.decode(event.data);
+			} catch(err) {
+				return;
+			}
+			//sanity
+			if(msg.message.byteLength <= 8 || msg.message.byteLength > 0xffffff)
+				return;
+
 			var ivm = msg.message.slice(0,8);
 			var arr = msg.message.slice(8,msg.message.byteLength-8);
 			var hmac = msg.message.slice(msg.message.byteLength-8, msg.message.byteLength)
 			var message = Uint8ToString(arr);
-			
+
 			//verify first hmac
 			var hmacarr = new Uint8Array(ivm.byteLength + arr.byteLength);
 			hmacarr.set(ivm, 0);
@@ -202,130 +212,164 @@ function open_socket(myport, myaddr, uid, channel) {
 			if(false == isEqualHmacs(hmac, rhmac)) {
 				return;
 			}
-			
+
 			var iv = u8arr2iv(ivm);
-			
+
 			var uid = bfEcb.trimZeros(bfEcb.decrypt(atob(msg.uid)));
 			var channel = bfEcb.trimZeros(bfEcb.decrypt(atob(msg.channel)));
 			var decrypted = bfCbc.decrypt(message, iv);
-			
+
+			if(decrypted.length < 16)
+				return;
+
 			var timestring = decrypted.slice(0,8);
 			var rarray = bfCbc.split64by32(timestring);
-			var timeU14 = unscatterTime(rarray[0], rarray[1]);
+			var timeU15 = unscatterTime(rarray[0], rarray[1]);
 			var weekstring = decrypted.slice(8,16);
 			var warray = bfCbc.split64by32(weekstring);
-			var weekU14 = unscatterTime(warray[0], warray[1]);
-			var msgDate = readTimestamp(timeU14 & ~0x4000, weekU14 & ~(0x4000|0x2000|0x1000));
+			var weekU15 = unscatterTime(warray[0], warray[1]);
+			var msgDate = readTimestamp(timeU15 & ~(ISFULL|ISIMAGE), weekU15 & ~(ISMULTI|ISFIRST|ISLAST));
 			var message = decrypted.slice(16, decrypted.byteLength);
-			
+
+			var isFull = false;
 			var isImage = false;
 			var isMultipart = false;
 			var isFirst = false;
 			var isLast = false;
-			if(timeU14 & 0x4000)
+			if(timeU15 & ISFULL) {
+				isFull = true;
+			}
+			if(timeU15 & ISIMAGE)
 				isImage = true;
-			if(weekU14 & 0x4000)
+			if(weekU15 & ISMULTI)
 				isMultipart = true;
-			if(weekU14 & 0x2000)
+			if(weekU15 & ISFIRST)
 				isFirst = true;
-			if(weekU14 & 0x1000)
+			if(weekU15 & ISLAST)
 				isLast = true;
-			
-			postMessage(["data", uid, channel, msgDate.valueOf(), message, isImage, isMultipart, isFirst, isLast]);
-        }
-    };
 
-    webSocket.onclose = function(event) {
-       webSocket.close();
-	   var uid = bfEcb.trimZeros(bfEcb.decrypt(atob(myuid)));
-	   var channel = bfEcb.trimZeros(bfEcb.decrypt(atob(mychannel)));	
-	   postMessage(["close", null, uid, channel, myuid, mychannel]);
-   };
+			postMessage(["data", uid, channel, msgDate.valueOf(), message, isFull, isImage, isMultipart, isFirst, isLast]);
+		}
+	};
+
+	webSocket.onclose = function(event) {
+		webSocket.close();
+		var uid = bfEcb.trimZeros(bfEcb.decrypt(atob(myuid)));
+		var channel = bfEcb.trimZeros(bfEcb.decrypt(atob(mychannel)));	
+		postMessage(["close", uid, channel, myuid, mychannel]);
+	};
 }
 
 onmessage = function(e) {
 	var cmd = e.data[0];
 	var data = e.data[1];
-	
+
 	switch(cmd) {
 		case "init":
 			myaddr = e.data[2];
 			myport = e.data[3];
 			var uid = e.data[4];
 			var channel = e.data[5];
-			var fullkey = e.data[6];
-			var isTokenChannel = e.data[7];
-			
+			var fullkey = StringToUint8(e.data[6]);
+			var isEncryptedChannel = e.data[7];
+
 			var round = new BLAKE2s();
-			round.update(StringToUint8(fullkey));
-			
+			round.update(fullkey);
+
 			var blakecb = new BLAKE2s(7); //56-bits max key len
 			blakecb.update(round.digest());
 			var ecbkey = blakecb.digest();
-			
+
 			var round = new BLAKE2s();
-			round.update(StringToUint8(fullkey));
-			round.update(StringToUint8(fullkey));
+			round.update(fullkey);
+			round.update(fullkey);
 			var blakeaontecb = new BLAKE2s(8); //aont key len
 			blakeaontecb.update(round.digest());
 			var ecbaontkey = blakeaontecb.digest();
-			
+
 			var blakecbc = new BLAKE2s(7); //56-bits max key len
-			blakecbc.update(StringToUint8(fullkey));
+			blakecbc.update(fullkey);
 			var cbckey = blakecbc.digest();
 
 			var round = new BLAKE2s();
-			round.update(StringToUint8(fullkey));
-			round.update(StringToUint8(fullkey));			
-			round.update(StringToUint8(fullkey));
+			round.update(fullkey);
+			round.update(fullkey);			
+			round.update(fullkey);
+
+			//drop unused
+			fullkey = "";
+
 			var blakeaontcbc = new BLAKE2s(8); //aont key len
 			blakeaontcbc.update(round.digest());
 			var cbcaontkey = blakeaontcbc.digest();
-		
+
 			bfEcb = new Blowfish(ecbkey, ecbaontkey);
 			bfCbc = new Blowfish(cbckey, cbcaontkey, "cbc");
 			myuid = btoa(bfEcb.encrypt(uid));
-		
+
 			var bfchannel;
-			if(!isTokenChannel) {
+			if(!isEncryptedChannel) {
 				bfchannel = bfEcb.encrypt(channel);
 				mychannel = btoa(bfchannel);
 			}
 			else {
 				mychannel = channel;
 			}
-			/* Fallthrough */
-		case "reconnect":
 			open_socket(myport, myaddr, myuid, mychannel);
+			break;
+		case "reconnect":
+			var uid = e.data[2];
+			var channel = e.data[3];
+			var isEncryptedChannel = e.data[4];
+
+			uid = btoa(bfEcb.encrypt(uid));
+			if(!isEncryptedChannel) {
+				bfchannel = bfEcb.encrypt(channel);
+				channel = btoa(bfchannel);
+			}
+			// verify that we have already opened the channel earlier
+			if(myuid === uid && mychannel === channel) {
+				open_socket(myport, myaddr, myuid, mychannel);
+			}
 			break;
 		case "send":
 			var uid = e.data[2];
 			var channel = e.data[3];
-			var isTokenChannel = e.data[4];
+			var isEncryptedChannel = e.data[4];
 			var randarr = e.data[5];
-			var isImage = e.data[6];
-			var isMultipart = e.data[7];
-			var isFirst = e.data[8];
-			var isLast = e.data[9];
+
+			//sanity
+			if(randarr.length != 6) {
+				break;
+			}
+
+			var isFull = e.data[6];
+			var isImage = e.data[7];
+			var isMultipart = e.data[8];
+			var isFirst = e.data[9];
+			var isLast = e.data[10];
 			var iv = randarr.slice(0,2);
 			var rarray = randarr.slice(2);
 
-			if(isTokenChannel) {
+			if(isEncryptedChannel) {
 				channel = bfEcb.trimZeros(bfEcb.decrypt(atob(channel)));
 			}
-			
+
 			var weekstamp = createWeekstamp();
 			var timestamp = createTimestamp(weekstamp);
+			if(isFull) {
+				timestamp |= ISFULL;
+			}
 			if(isImage) {
-				timestamp = timestamp | 0x4000;
+				timestamp |= ISIMAGE;
 			}
 			if(isMultipart) {
-				weekstamp = weekstamp | 0x4000;
+				weekstamp |= ISMULTI;
 				if(isFirst) {
-					weekstamp = weekstamp | 0x2000;	
+					weekstamp |= ISFIRST;	
 				}
 				if(isLast) {
-					weekstamp = weekstamp | 0x1000;	
+					weekstamp |= ISLAST;	
 				}
 			}
 			var sval = scatterTime(rarray[0], rarray[1], timestamp);
@@ -334,20 +378,20 @@ onmessage = function(e) {
 			rarray[3] = sval;
 
 			var newmessage = bfCbc.num2block32(rarray[0]) + bfCbc.num2block32(rarray[1]) + 
-							bfCbc.num2block32(rarray[2]) + bfCbc.num2block32(rarray[3]) +  data;
+				bfCbc.num2block32(rarray[2]) + bfCbc.num2block32(rarray[3]) +  data;
 			var encrypted = bfCbc.encrypt(newmessage, iv);
 			var ivarr = iv2u8arr(iv);
 			var arr = StringToUint8(encrypted);
-			
+
 			// calculate 8 byte hmac
 			var hmacarr = new Uint8Array(ivarr.byteLength + arr.byteLength);
 			hmacarr.set(ivarr, 0);
 			hmacarr.set(arr, ivarr.byteLength);
-			
+
 			var blakehmac = new BLAKE2s(8, ecbkey);
 			blakehmac.update(hmacarr);
 			var hmac = blakehmac.digest();
-			
+
 			var newarr = new Uint8Array(ivarr.byteLength + arr.byteLength + hmac.byteLength);
 			newarr.set(ivarr, 0);
 			newarr.set(arr, ivarr.byteLength);
@@ -358,14 +402,24 @@ onmessage = function(e) {
 				channel: btoa(bfEcb.encrypt(channel)),
 				message: newarr
 			};
-			var cbor = CBOR.encode(obj);
-			webSocket.send(cbor);
+			var cbor;
+			try {
+				cbor = CBOR.encode(obj);
+			} catch(err) {
+				break;
+			}
+			try {
+				webSocket.send(cbor);
+			} catch(err) {
+				break; 
+			}
 			postMessage(["send", uid, channel, isMultipart]);
 			break;
 		case "close":
+			var uid = e.data[2];
+			var channel = e.data[3];
+			var isEncryptedChannel = e.data[4];
 			webSocket.close();
 			break;
 	}
 }
-
-
