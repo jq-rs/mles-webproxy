@@ -258,11 +258,11 @@ $(document).ready(function() {
 
 function ask_channel() {
 	if ($('#input_name').val().trim().length <= 0 ||
-		(mytoken == null && $('#input_channel').val().trim().length <= 0) ||
+		mytoken == null ||
 		$('#input_key').val().trim().length <= 0 ) {
 
 		//not enough input, alert
-		pop_alert();
+		pop_alert(mytoken);
 
 	} else {
 		if(!initOk) {
@@ -966,7 +966,12 @@ function set_language() {
 	}
 }
 
-function pop_alert() {
+function pop_alert(mytoken) {
+	if(mytoken == null) {
+		alert('Token is missing!');
+		return;
+	}
+
 	var language = $("#channel_localization").val();
 	switch(language) {
 		case "fi":
