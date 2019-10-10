@@ -848,8 +848,8 @@ function set_language() {
 	
 	switch(language) {
 		case "fi":
+			$("#token_title").text("MlesTalk kutsu!");
 			$("#channel_user_name").text("Nimesi?");
-			$("#channel_name").text("Kanava?");
 			$("#channel_key").text("Jaettu avain?");
 			$("#channel_server").text("Mles WebSocket palvelimen osoite");
 			$("#channel_exit").val("poistu");
@@ -866,8 +866,8 @@ function set_language() {
 			bgText = "Ilmoitukset aktiivisena";
 			break;
 		case "se":
+			$("#token_title").text("MlesTalk inbjudan!");
 			$("#channel_user_name").text("Ditt namn?");
-			$("#channel_name").text("Kanal?");
 			$("#channel_key").text("Delad nyckel?");
 			$("#channel_server").text("Mles WebSocket server adress");
 			$("#channel_exit").val("utgång");
@@ -884,8 +884,8 @@ function set_language() {
 			bgText = "Meddelanden aktiva";
 			break;
 		case "es":
+			$("#token_title").text("Invitación MlesTalk!");
 			$("#channel_user_name").text("Su nombre?");
-			$("#channel_name").text("Canal?");
 			$("#channel_key").text("Llave compartida?");
 			$("#channel_server").text("Mles WebSocket dirección del servidor");
 			$("#channel_exit").val("salida");
@@ -902,8 +902,8 @@ function set_language() {
 			bgText = "Notificaciones activas";
 			break;
 		case "de":
+			$("#token_title").text("MlesTalk Einladung!");
 			$("#channel_user_name").text("Dein name?");
-			$("#channel_name").text("Kanal?");
 			$("#channel_key").text("Gemeinsamer Schlüssel?");
 			$("#channel_server").text("Mles WebSocket Serveradresse");
 			$("#channel_exit").val("abgehen");
@@ -920,8 +920,8 @@ function set_language() {
 			bgText = "Benachrichtigungen aktiv";
 			break;
 		case "fr":
+			$("#token_title").text("Invitation MlesTalk!");
 			$("#channel_user_name").text("Votre nom?");
-			$("#channel_name").text("Canal?");
 			$("#channel_key").text("Clé partagée?");
 			$("#channel_server").text("Mles WebSocket adresse du serveur");
 			$("#channel_exit").val("sortie");
@@ -939,8 +939,8 @@ function set_language() {
 			break;
 		case "gb":
 		default:
+			$("#token_title").text("MlesTalk invitation!");
 			$("#channel_user_name").text("Your name?");
-			$("#channel_name").text("Channel?");
 			$("#channel_key").text("Shared key?");
 			$("#channel_server").text("Mles WebSocket server address");
 			$("#channel_exit").val("exit");
@@ -967,31 +967,50 @@ function set_language() {
 }
 
 function pop_alert(mytoken) {
+	var language = $("#channel_localization").val();
 	if(mytoken == null) {
-		alert('Token is missing!');
-		return;
+		switch(language) {
+			case "fi":
+				alert('Kutsun tunnus puuttuu!');
+				return;
+			case "se":
+				alert('Saknad inbjudnings-id!');
+				return;
+			case "es":
+				alert('Falta la identificación de la invitación!');
+				return;
+			case "de":
+				alert('Fehlende Einladungs-ID!');
+				return;
+			case "fr":
+				alert("Identifiant d'invitation manquant!");
+				return;
+			case "gb":
+			default:
+				alert('Missing invitation id!');
+				return;
+		}
 	}
 
-	var language = $("#channel_localization").val();
 	switch(language) {
 		case "fi":
-			alert('Nimi, kanava ja jaettu avain?');
+			alert('Nimi ja jaettu avain?');
 			break;
 		case "se":
-			alert('Namn, kanal och delad nyckel?');
+			alert('Namn och delad nyckel?');
 			break;
 		case "es":
-			alert('Nombre, canal y clave compartida?');
+			alert('Nombre y clave compartida?');
 			break;
-		case "de":
-			alert('Name, Kanal und gemeinsamer Schlüssel?');
+		case "de":yy
+			alert('Name und gemeinsamer Schlüssel?');
 			break;
 		case "fr":
-			alert('Nom, canal et clé partagée?');
+			alert('Nom et clé partagée?');
 			break;
 		case "gb":
 		default:
-			alert('Name, channel and shared key?');
+			alert('Name and shared key?');
 			break;
 	}
 }
