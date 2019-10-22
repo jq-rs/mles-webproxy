@@ -690,8 +690,6 @@ function update_after_send(message, isFull, isImage) {
 	if(!isImage) {
 		var li = '<div id="owner' + ownid + '"><li class="own"> ' + dateString + "" + autolinker.link( message ) + '</li></div>';
 		if(isFull) {
-			if(isResync)
-				$('#messages').append(li);
 			ownid = ownid + 1;
 			ownappend = false;
 		}
