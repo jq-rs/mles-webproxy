@@ -25,9 +25,20 @@
 
 <h2>About MlesTalk</h2>
 
-<p>MlesTalk is an open source instant messenger between two or more users on a same channel. Instead of just seeing the finalized messages, see how everyone write their messages, character by character. UTF8 support, emojis and images are also supported. Avoid centralized services like Messenger or WhatsApp, have a freedom to pick freely the server to connect to - or setup your own!</p>
+<p>MlesTalk is an open source character-by-character messenger between two or more users on a same channel. See how everyone is writing their messages, character by character! Exchange thoughts faster. Avoid centralized services, have a freedom to pick freely the server to connect to - or even setup your own!</p>
 
-<p>In addition to username and channel, you'll need to pick a shared key with other channel users. The key provides lightweight (56-bit, low level of security) end-to-end security for messages on the channel. You can share your channel with friends without MlesTalk easily with provided QR-code or use it on browser yourself.</p>
+<p>
+<b>Key features:</b>
+<ul>
+	<li>See messages character-by-character!</li>
+	<li>UTF8-support, emojis and images are also supported</li>
+	<li>Message notifications while on background</li>
+	<li>Respects privacy fully - does not collect any user information</li>
+	<li>WebSocket connection to the selected server only, no other dependencies</li>
+	<li>Easy on battery</li>
+</ul>
+</p>
+<p>In addition to username and channel, you'll need to pick a shared key with other channel users. You can share your channel with friends without MlesTalk easily with provided QR-code or use it on a browser yourself.</p>
 
 <p>Retro-feeling for those Unix-era users who remember the magnificent Talk program.</p>
 
@@ -43,6 +54,8 @@
 </ul>
 
 <p>Please join <a href="http://reddit.com/r/mles">/r/mles</a> Reddit community to get info about new features of MlesTalk or Mles procotol in general.</p>
+
+<p>By purchasing MlesTalk you support its further development.</p>
 
 <p>Connectivity is based on open Mles-Websocket protocol. Please see <a href="http://mles.io">http://mles.io</a> for more information.</p>
 
@@ -62,11 +75,11 @@
 
 <p>Messages are not saved by the application and are in practice lost when the MlesTalk application is closed from application point of view. At least some of the messages on the channel can be restored from an Mles-Websocket server during reconnection to the channel, if the server supports message history.</p>
 
-<h4>How are the messages secured?</h4>
+<h4>Are the messages secured somehow?</h4>
 
-<p>All messages are secured with symmetrical Blowfish with max key length of 56-bits with CTS+AONT and Blake2 HMAC. Messages can be opened easily only by the channel users who have the channel name and the key available. These low level security measures will not protect messages from serious decryption efforts, if messages are obtained by a 3rd party. The Mles-Websocket server, which forwards messages on the selected channel, is not aware of the key used on the channel.</p>
-<p>56-bit key size equals 72,057,594,037,927,936 possible keys. As Blowfish is designed to have large initialization delay, the 56-bit key size combined with AONT guarantees lightweight security for messaging. In practice, this should mean that brute force decryption efforts without special arrangements take long enough that it is not a feasible choice for a possible attacker.</p>
-<p>Considering block size, <a href="https://sweet32.info/">Sweet32 birthday attack</a> is the worst known attack at the moment against block ciphers with 64-bit block size. It needs several hundreds of GBs of traffic to be effective. Thus, it does not really apply to a messenger with very limited amount of message traffic, like MlesTalk.</p> 
+<p>Messages are not secured in any safe way. You should not count on MlesTalk if you want to have secure communications.</p>
+
+<p>However, messages are not plain text either as they are obfusciated with symmetrical Blowfish with max key length of 56-bits with CTS+AONT and Blake2 HMAC.</p>
 
 <h4>I cannot log into channel with the same user name twice, i.e from the web GUI. What can I do?</h4>
 
