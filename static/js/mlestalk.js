@@ -488,13 +488,6 @@ webWorker.onmessage = function(e) {
 			var dateString = "[" + stamptime(new Date(msgTimestamp)) + "] ";
 			var now = timenow();
 
-			//for a transition period to new format, drop all messages which are not this year
-			if(dateString.charAt(7) != now.charAt(6) || dateString.charAt(8) != now.charAt(7) ||
-			   dateString.charAt(9) != now.charAt(8) || dateString.charAt(10) != now.charAt(9)) {
-				console.log("Drop incorrect year " + dateString + "" + dateString.charAt(9) + "" + dateString.charAt(10));
-				break;
-			}
-
 			if(uid == myname) {
 				if(!isResync) {
 					console.log("Resyncing");
