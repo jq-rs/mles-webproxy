@@ -46,6 +46,9 @@ lazy_static! {
     static ref FILE_MAP: FnvHashMap<&'static str, &'static str> = {
         let mut file_map = FnvHashMap::default();
         file_map.insert("/", "static/index.html");
+        file_map.insert("/blog.html", "static/blog.html");
+        file_map.insert("/legal.html", "static/legal.html");
+        file_map.insert("/app.html", "static/app.html");
         file_map.insert("/blog", "static/blog.html");
         file_map.insert("/legal", "static/legal.html");
         file_map.insert("/app", "static/app.html");
