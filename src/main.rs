@@ -1,289 +1,168 @@
-extern crate tokio_core;
-extern crate futures;
-extern crate tk_bufstream;
-extern crate netbuf;
-extern crate tk_http;
-extern crate tk_listen;
-#[macro_use]
-extern crate lazy_static;
-extern crate fnv;
-extern crate bytes;
-extern crate mles_utils;
-extern crate tokio_io;
 
-use tokio_core::net::{TcpListener};
-use futures::{Stream, Future, Sink};
-use futures::future::{FutureResult, ok};
-use futures::sync::mpsc::{unbounded, UnboundedSender};
+use futures::sync::oneshot;
+use warp::{path, Filter, Future as WarpFuture, Stream, http::Response};
+use warp::filters::ws::Message;
+use tokio::runtime::current_thread::{Runtime, TaskExecutor};
+
+use futures::{Future, Sink};
+use futures::sync::mpsc::unbounded;
+use std::io::{Error, ErrorKind};
+use std::net::SocketAddr;
+use std::time::Duration;
 use bytes::BytesMut;
-
-use tk_http::{Status};
-use tk_http::server::buffered::{Request, BufferedDispatcher};
-use tk_http::server::{Encoder, EncoderDone, Config, Proto, Error};
-use tk_http::websocket::{Loop, Config as WebsockConfig, Dispatcher, Frame};
-use tk_http::websocket::{Error as WsErr};
-use tk_http::websocket::Packet::{self};
-use tk_listen::ListenExt;
-
+use mles_utils::*;
+use tokio::net::TcpStream;
+use tokio_io::codec::Decoder;
 use std::{env};
 use std::io::{self, Read};
-use std::time::Duration;
-
-use tokio_core::reactor::Core;
-use tokio_core::net::TcpStream;
 use tokio_io::codec::{Encoder as TokioEncoder, Decoder as TokioDecoder};
 
-use std::fs::File;
-use std::io::{Error as StdError, ErrorKind};
-use std::net::{SocketAddr};
-
-use fnv::FnvHashMap;
-use mles_utils::*;
-        
-const ACCEPTED_PROTOCOL: &str = "mles-websocket";
-
-lazy_static! {
-    static ref FILE_MAP: FnvHashMap<&'static str, &'static str> = {
-        let mut file_map = FnvHashMap::default();
-        file_map.insert("/", "static/index.html");
-        file_map.insert("/blog.html", "static/blog.html");
-        file_map.insert("/legal.html", "static/legal.html");
-        file_map.insert("/app.html", "static/app.html");
-        file_map.insert("/blog", "static/blog.html");
-        file_map.insert("/legal", "static/legal.html");
-        file_map.insert("/app", "static/app.html");
-        file_map.insert("/web", "static/mles-websocket-token.html");
-        file_map.insert("/images/simple_performance_comparison.png", "static/images/simple_performance_comparison.png");
-        file_map.insert("/images/mles_logo_final.png", "static/images/mles_logo_final.png");
-        file_map.insert("/images/mles_header_key.png", "static/images/mles_header_key.png");
-        file_map.insert("/images/mles_usecase_with_clients_trans.png", "static/images/mles_usecase_with_clients_trans.png");
-        file_map.insert("/images/mles_usecase_with_peer_trans.png", "static/images/mles_usecase_with_peer_trans.png");
-        file_map.insert("/img/icon.png", "static/img/icon.png");
-        file_map.insert("/img/sendimage.png", "static/img/sendimage.png");
-        file_map.insert("/img/smallIcon.png", "static/img/smallIcon.png");
-        file_map.insert("/js/Autolinker.min.js", "static/js/Autolinker.min.js");
-        file_map.insert("/mles-webworker/js/blake2s.js", "static/mles-webworker/js/blake2s.js");
-        file_map.insert("/mles-webworker/js/blowfish.js", "static/mles-webworker/js/blowfish.js");
-        file_map.insert("/mles-webworker/js/cbor.js", "static/mles-webworker/js/cbor.js");
-        file_map.insert("/js/mlestalk.js", "static/js/mlestalk.js");
-        file_map.insert("/js/jquery-3.3.1.min.js", "static/js/jquery-3.3.1.min.js");
-        file_map.insert("/js/qrcode.min.js", "static/js/qrcode.min.js");
-        file_map.insert("/js/siphash.js", "static/js/siphash.js");
-        file_map.insert("/mles-webworker/js/webworker.js", "static/mles-webworker/js/webworker.js");
-        file_map.insert("/js/zoom-vanilla.js", "static/js/zoom-vanilla.js");
-        file_map.insert("/css/zoom.css", "static/css/zoom.css");
-        file_map.insert("/css/mlestalk.css", "static/css/mlestalk.css");
-        file_map
-    };
-}
-
-fn service<S>(req: Request, mut e: Encoder<S>)
-    -> FutureResult<EncoderDone<S>, Error>
-{
-    let path = req.path();
-
-    /* WebSocket upgrade handling */
-    if let Some(ws) = req.websocket_handshake() {
-        /* Check if ws protocol is correct */
-        let protocols = &ws.protocols;
-        for protocol in protocols {
-            if protocol == ACCEPTED_PROTOCOL {
-                e.status(Status::SwitchingProtocol);
-                e.add_header("Connection", "upgrade").unwrap();
-                e.add_header("Upgrade", "websocket").unwrap();
-                e.format_header("Sec-Websocket-Accept", &ws.accept).unwrap();
-                e.add_header("Sec-Websocket-Protocol", ACCEPTED_PROTOCOL).unwrap();
-                e.done_headers().unwrap();
-                return ok(e.done());
-            }
-        }
-        let contents = "404 error!";
-        e.status(Status::NotFound);
-        e.add_length(contents.len() as u64).unwrap();
-        if e.done_headers().unwrap() {
-            e.write_body(contents.as_bytes());
-        }
-        return ok(e.done());
-    }
-
-    let splitted_path: Vec<&str> = path.split('?').collect();
-    let split_path = splitted_path.first();
-    match split_path {
-        Some(apath) => {
-            match FILE_MAP.get(apath) {
-                Some(filepath) => {
-                    let mut contents = Vec::new();
-                    let mut file = File::open(filepath).unwrap();
-                    let res = file.read_to_end(&mut contents);
-                    let sz = res.unwrap();
-                    e.status(Status::Ok);
-                    let js = filepath.find(".js");
-                    match js {
-                        Some(_) => e.add_header("Content-Type", "text/javascript").unwrap(),
-                        None => {}
-                    }
-                    e.add_length(sz as u64).unwrap();
-                    if e.done_headers().unwrap() {
-                        e.write_body(&contents);
-                    }
-                },
-                None => {
-                    let contents = "404 error!";
-                    e.status(Status::NotFound);
-                    e.add_length(contents.len() as u64).unwrap();
-                    if e.done_headers().unwrap() {
-                        e.write_body(contents.as_bytes());
-                    }
-                }
-            }
-        },
-        None => {
-            let contents = "404 error!";
-            e.status(Status::NotFound);
-            e.add_length(contents.len() as u64).unwrap();
-            if e.done_headers().unwrap() {
-                e.write_body(contents.as_bytes());
-            }
-        }
-    }
-    ok(e.done())
-}
-
-struct MlesProxy(UnboundedSender<Packet>);
-
-impl Dispatcher for MlesProxy {
-    type Future = FutureResult<(), WsErr>;
-    fn frame(&mut self, frame: &Frame) -> FutureResult<(), WsErr> {
-        let _ = self.0.start_send(frame.into()).map_err(|err| {
-            StdError::new(ErrorKind::Other, err)
-        });                                      
-        let _ = self.0.poll_complete().map_err(|err| {
-            StdError::new(ErrorKind::Other, err)
-        });                           
-        ok(())
-    }
-}
-
 fn main() {
-    let mut lp = Core::new().unwrap();
-    let h1 = lp.handle();
+    let mut runtime = Runtime::new().unwrap();
 
-    let addr = "0.0.0.0:80".parse().unwrap();
-    let listener = TcpListener::bind(&addr, &lp.handle()).unwrap();
-    let cfg = Config::new().done();
-    let wcfg = WebsockConfig::new().ping_interval(Duration::from_millis(20000))
-                                   .inactivity_timeout(Duration::from_millis(25000))
-                                   .max_packet_size(0xffffff)
-                                   .done();
-    let raddr = "127.0.0.1:8077".parse().unwrap();
+    let index = warp::fs::dir("/home/ubuntu/www/arki-server/static");
+    // Match any request and return hello world!
+    //let mut runtime = Runtime::new().unwrap();
 
-    let done = listener.incoming()
-        .sleep_on_error(Duration::from_millis(100), &lp.handle())
-        .map(move |(socket, addr)| {
-            let wcfg = wcfg.clone();
-            let h2 = h1.clone();
-            Proto::new(socket, &cfg,
-                       BufferedDispatcher::new_with_websockets(addr, &h1,
-                                                               service,
-                                                               move |out, inp| {
-                                                                   let handle = h2.clone();
+    println!("Starting WS server!");
+    let ws = warp::ws2().and(warp::header::exact("sec-websocket-protocol",
+"mles-websocket"))
+        .map(|ws: warp::ws::Ws2| {
+            println!("WS connection");
+            // And then our closure will be called when it completes...
+            ws.on_upgrade(|websocket| {
+                println!("Just upgraded!");
 
-                                                                   let keyval = match env::var("MLES_KEY") {
-                                                                       Ok(val) => val,
-                                                                       Err(_) => "".to_string(),
-                                                                   };
+                let raddr = "127.0.0.1:8077".parse().unwrap();
+                let tcp = TcpStream::connect(&raddr);
+                let mut cid: Option<u32> = None;
+                let mut key: Option<u64> = None;
+                let mut keys = Vec::new();
 
-                                                                   let keyaddr = match env::var("MLES_ADDR_KEY") {
-                                                                       Ok(val) => val,
-                                                                       Err(_) => "".to_string(),
-                                                                   };
+                let (ws_tx, ws_rx) = unbounded();
+                let (mles_tx, mles_rx) = unbounded();
 
-                                                                   let (tx, rx) = unbounded();
-                                                                   let (tx_mles, rx_mles) = unbounded(); //tx is passed to Dispatcher, rx is connected to Mles server
+                let keyval = match env::var("MLES_KEY") {
+                    Ok(val) => val,
+                    Err(_) => "".to_string(),
+                };
 
-                                                                   let tcp = TcpStream::connect(&raddr, &handle);
+                let keyaddr = match env::var("MLES_ADDR_KEY") {
+                    Ok(val) => val,
+                    Err(_) => "".to_string(),
+                };
 
-                                                                   let mut cid: Option<u32> = None;
-                                                                   let mut key: Option<u64> = None;
-                                                                   let mut keys = Vec::new();
+                let client = tcp
+                    .and_then(move |stream| {
+                        let _val = stream
+                            .set_nodelay(true)
+                            .map_err(|_| panic!("Cannot set to no delay"));
+                        let _val = stream
+                            .set_keepalive(Some(Duration::new(10, 0)))
+                            .map_err(|_| panic!("Cannot set keepalive"));
+                        let laddr = match stream.local_addr() {
+                            Ok(laddr) => laddr,
+                            Err(_) => {
+                                let addr = "0.0.0.0:0";
+                                addr.parse::<SocketAddr>().unwrap()
+                            }
+                        };
+                        let keyval_inner = keyval.clone();
+                        let keyaddr_inner = keyaddr.clone();
 
-                                                                   let client = tcp.and_then(move |stream| {
+                        if !keyval_inner.is_empty() {
+                            keys.push(keyval_inner);
+                        } else {
+                            keys.push(MsgHdr::addr2str(&laddr));
+                            if !keyaddr_inner.is_empty() {
+                                keys.push(keyaddr_inner);
+                            }
+                        }
 
-                                                                       let _val = stream.set_nodelay(true)
-                                                                           .map_err(|_| panic!("Cannot set to no delay"));
-                                                                       let _val = stream.set_keepalive(Some(Duration::new(5, 0)))
-                                                                           .map_err(|_| panic!("Cannot set keepalive"));
-                                                                       let laddr = match stream.local_addr() {
-                                                                           Ok(laddr) => laddr,
-                                                                           Err(_) => {
-                                                                               let addr = "0.0.0.0:0";
-                                                                               addr.parse::<SocketAddr>().unwrap()
-                                                                           }
-                                                                       };
-                                                                       if  !keyval.is_empty() {
-                                                                           keys.push(keyval);
-                                                                       } else {            
-                                                                           keys.push(MsgHdr::addr2str(&laddr));
-                                                                           if !keyaddr.is_empty() {
-                                                                               keys.push(keyaddr);
-                                                                           }
-                                                                       }
-                                                                       let (sink, stream) = Bytes.framed(stream).split();
-                                                                       let mles_rx = rx_mles.map_err(|_| panic!()); // errors not possible on rx XXX
-                                                                       let mles_rx = mles_rx.and_then(move |buf| { //we receive websocket packet here
-                                                                           match buf {
-                                                                               Packet::Binary(buf) => {
-                                                                                   if buf.is_empty() {
-                                                                                       return Err(StdError::new(ErrorKind::BrokenPipe, "broken pipe"));
-                                                                                   }
-                                                                                   if None == key {
-                                                                                       //create hash for verification
-                                                                                       let decoded_message = Msg::decode(buf.as_slice());
-                                                                                       keys.push(decoded_message.get_uid().to_string());
-                                                                                       keys.push(decoded_message.get_channel().to_string());
-                                                                                       key = Some(MsgHdr::do_hash(&keys));
-                                                                                       cid = Some(MsgHdr::select_cid(key.unwrap()));
-                                                                                   }
-                                                                                   let msghdr = MsgHdr::new(buf.len() as u32, cid.unwrap(), key.unwrap());
-                                                                                   let mut msgv = msghdr.encode();
-                                                                                   msgv.extend(buf);
-                                                                                   Ok(msgv)
-                                                                               },
-                                                                               _ => Ok(Vec::new())
-                                                                           }
-                                                                       });
+                        let (sink, stream) = Bytes.framed(stream).split();
 
-                                                                       let send_wsrx = mles_rx.forward(sink);
-                                                                       let write_wstx = stream.for_each(move |buf| {
-                                                                           let ws_tx_inner = tx.clone();
-                                                                           // send to websocket
-                                                                           let _ = ws_tx_inner.send(Packet::Binary(buf.to_vec())).wait().map_err(|err| {
-                                                                               StdError::new(ErrorKind::Other, err)
-                                                                           });              
-                                                                           Ok(())
-                                                                       });
+                        let mles_rx = mles_rx.map_err(|_| panic!()); // errors not possible on rx XXX
+                        let mles_rx = mles_rx.and_then(move |buf: Vec<_>| {
+                            if buf.is_empty() {
+                                return Err(Error::new(ErrorKind::BrokenPipe, "broken pipe"));
+                            }
+                            if None == key {
+                                //create hash for verification
+                                let decoded_message = Msg::decode(buf.as_slice());
+                                keys.push(decoded_message.get_uid().to_string());
+                                keys.push(decoded_message.get_channel().to_string());
+                                key = Some(MsgHdr::do_hash(&keys));
+                                cid = Some(MsgHdr::select_cid(key.unwrap()));
+                            }
+                            let msghdr = MsgHdr::new(buf.len() as u32, cid.unwrap(), key.unwrap());
+                            let mut msgv = msghdr.encode();
+                            msgv.extend(buf);
+                            Ok(msgv)
+                        });
 
-                                                                       send_wsrx
-                                                                           .map(|_| ())
-                                                                           .select(write_wstx.map(|_| ()))
-                                                                           .then(|_| Ok(()))
-                                                                   });
-                                                                   handle.spawn(client.then(move |_| {
-                                                                       println!("Connection closed");
-                                                                       Ok(())
-                                                                    }));
-                                                                   //send tx to mles handler
-                                                                   let rx = rx.map_err(|_| format!("stream closed"));
-                                                                   Loop::server(out, inp, rx, MlesProxy(tx_mles), &wcfg, &h2)
-                                                                       .map_err(|e| println!("websocket closed: {}", e))
-                                                               }),
-                                                               &h1)
-                .map_err(|e| { println!("Connection error: {}", e); })
-                .then(|_| Ok(())) // don't fail, please
-        })
-    .listen(100000);
+                        let send_wsrx = mles_rx.forward(sink);
+                        let write_wstx = stream.for_each(move |buf| {
+                            let ws_tx_inner = ws_tx.clone();
+                            // send to websocket
+                            let _ = ws_tx_inner
+                                .send(buf.to_vec())
+                                .wait()
+                                .map_err(|err| Error::new(ErrorKind::Other, err));
+                            Ok(())
+                        });
 
-    lp.run(done).unwrap();
+                        send_wsrx
+                            .map(|_| ())
+                            .select(write_wstx.map(|_| ()))
+                            .then(|_| Ok(()))
+                    })
+                    .map_err(|_| {});
+                    //tokio::spawn(client);
+
+                let (sink, stream) = websocket.split();
+
+                let ws_reader = stream.for_each(move |message: Message| {
+                    let mles_tx = mles_tx.clone();
+                    let mles_message: Vec<u8> = message.into();
+                    let _ = mles_tx
+                        .send(mles_message.clone())
+                        .wait()
+                        .map_err(|err| Error::new(ErrorKind::Other, err));
+                    Ok(())
+                });
+
+                let ws_writer = ws_rx.fold(sink, |mut sink, msg| {
+                    let msg = Message::binary(msg);
+                    let _ = sink
+                        .start_send(msg)
+                        .map_err(|err| Error::new(ErrorKind::Other, err));
+                    let _ = sink
+                        .poll_complete()
+                        .map_err(|err| Error::new(ErrorKind::Other, err));
+                    Ok(sink)
+                });
+                let connection = ws_reader
+                    .map(|_| ())
+                    .map_err(|_| ())
+                    .select(ws_writer.map(|_| ()).map_err(|_| ()));
+
+                TaskExecutor::current()
+                    .spawn_local(Box::new(connection.then(move |_| {
+                        println!("Connection closed.");
+                        Ok(())
+                    })))
+                    .unwrap();
+                client
+            })
+        }).with(warp::reply::with::header("Sec-WebSocket-Protocol", "mles-websocket"));
+
+    let routes = index.or(ws);
+
+    let warp_routes = warp::serve(routes).bind(([0, 0, 0, 0], 8080));
+    //tokio::run(warp_routes);
+    runtime.spawn(warp_routes);
+
+    runtime.run();
 }
 struct Bytes;
 
