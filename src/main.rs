@@ -2,7 +2,7 @@
 use futures::sync::oneshot;
 use warp::{path, Filter, Future as WarpFuture, Stream, http::Response};
 use warp::filters::ws::Message;
-use tokio::runtime::current_thread::{Runtime, TaskExecutor};
+//use tokio::runtime::current_thread::{Runtime, TaskExecutor};
 
 use futures::{Future, Sink};
 use futures::sync::mpsc::unbounded;
@@ -18,7 +18,7 @@ use std::io::{self, Read};
 use tokio_io::codec::{Encoder as TokioEncoder, Decoder as TokioDecoder};
 
 fn main() {
-    let mut runtime = Runtime::new().unwrap();
+    //let mut runtime = Runtime::new().unwrap();
 
     let index = warp::fs::dir("/home/ubuntu/www/arki-server/static");
     // Match any request and return hello world!
@@ -144,14 +144,17 @@ fn main() {
                 let connection = ws_reader
                     .map(|_| ())
                     .map_err(|_| ())
-                    .select(ws_writer.map(|_| ()).map_err(|_| ()));
+                    .select(ws_writer.map(|_| ()).map_err(|_| ()))
+                    .then(|_| Ok(()));
 
-                TaskExecutor::current()
-                    .spawn_local(Box::new(connection.then(move |_| {
-                        println!("Connection closed.");
-                        Ok(())
-                    })))
-                    .unwrap();
+                tokio::spawn(connection);
+
+                //TaskExecutor::current()
+                //    .spawn_local(Box::new(connection.then(move |_| {
+                //        println!("Connection closed.");
+                 //       Ok(())
+                 //   })))
+                 //   .unwrap();
                 client
             })
         }).with(warp::reply::with::header("Sec-WebSocket-Protocol", "mles-websocket"));
@@ -159,10 +162,10 @@ fn main() {
     let routes = index.or(ws);
 
     let warp_routes = warp::serve(routes).bind(([0, 0, 0, 0], 8080));
-    //tokio::run(warp_routes);
-    runtime.spawn(warp_routes);
+    tokio::run(warp_routes);
+    //runtime.spawn(warp_routes);
 
-    runtime.run();
+    //runtime.run();
 }
 struct Bytes;
 
