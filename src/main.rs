@@ -1,6 +1,6 @@
 
 //use futures::sync::oneshot;
-use warp::{Filter, Future as WarpFuture, Stream};
+use warp::{Filter, Future, Stream};
 use warp::filters::ws::Message;
 
 use futures::Sink;
@@ -16,10 +16,17 @@ use std::io::{self};
 use tokio_io::codec::{Encoder as TokioEncoder, Decoder as TokioDecoder};
 use mles_utils::*;
 
+mod acme;
+
 fn main() {
-    println!("Starting Mles Websocket proxy...");
+    std::thread::spawn(|| {
+        let index_https = warp::fs::dir("/home/ubuntu/www/arki-server/static");
+        println!("Spawning https-site!");
+        let _ = acme::lets_encrypt(index_https, "jq-rs@mles.io", "mles.io");
+    });
 
     let index = warp::fs::dir("/home/ubuntu/www/arki-server/static");
+    println!("Starting Mles Websocket proxy...");
     let ws = warp::ws2().and(warp::header::exact("Sec-WebSocket-Protocol", "mles-websocket"))
         .map(|ws: warp::ws::Ws2| {
             // And then our closure will be called when it completes...
