@@ -7,23 +7,28 @@ use futures::Sink;
 use futures::sync::mpsc::unbounded;
 use std::io::{Error, ErrorKind};
 use std::net::SocketAddr;
-use std::time::Duration;
 use bytes::BytesMut;
 use tokio::net::TcpStream;
 use tokio_io::codec::Decoder;
 use std::env;
 use std::io::{self};
 use tokio_io::codec::{Encoder as TokioEncoder, Decoder as TokioDecoder};
+use futures::prelude::*;
+
+use tokio::timer::{Delay, Interval};
+use std::time::{Duration, Instant};
 use mles_utils::*;
 
 mod acme;
 
 fn main() {
+    /*
     std::thread::spawn(|| {
         let index_https = warp::fs::dir("/home/ubuntu/www/arki-server/static");
         println!("Spawning https-site!");
         let _ = acme::lets_encrypt(index_https, "jq-rs@mles.io", "mles.io");
     });
+    */
 
     let index = warp::fs::dir("/home/ubuntu/www/arki-server/static");
     println!("Starting Mles Websocket proxy...");
@@ -31,6 +36,7 @@ fn main() {
         .map(|ws: warp::ws::Ws2| {
             // And then our closure will be called when it completes...
             ws.on_upgrade(|websocket| {
+                println!("Upgraded to websocket!");
                 let raddr = "127.0.0.1:8077".parse().unwrap();
                 let keyval = match env::var("MLES_KEY") {
                     Ok(val) => val,
@@ -100,11 +106,13 @@ fn main() {
 
                         let send_wsrx = mles_rx.forward(sink);
                         let write_wstx = stream.for_each(move |buf| {
-                            let ws_tx_inner = ws_tx.clone();
+                            let mut ws_tx_inner = ws_tx.clone();
                             // send to websocket
                             let _ = ws_tx_inner
-                                .send(buf.to_vec())
-                                .wait()
+                                .poll_complete()
+                                .map_err(|err| Error::new(ErrorKind::Other, err));
+                            let _ = ws_tx_inner
+                                .start_send(buf.to_vec())
                                 .map_err(|err| Error::new(ErrorKind::Other, err));
                             Ok(())
                         });
@@ -118,12 +126,15 @@ fn main() {
 
                 let (sink, stream) = websocket.split();
 
+                let mles_tx_inner = mles_tx.clone();
                 let ws_reader = stream.for_each(move |message: Message| {
-                    let mles_tx = mles_tx.clone();
-                    let mles_message: Vec<u8> = message.into();
+                    let mut mles_tx = mles_tx_inner.clone();
+                    let mles_message = message.into_bytes();
                     let _ = mles_tx
-                        .send(mles_message)
-                        .wait()
+                        .poll_complete()
+                        .map_err(|err| Error::new(ErrorKind::Other, err));
+                    let _ = mles_tx
+                        .start_send(mles_message)
                         .map_err(|err| Error::new(ErrorKind::Other, err));
                     Ok(())
                 });
@@ -131,13 +142,14 @@ fn main() {
                 let ws_writer = ws_rx.fold(sink, |mut sink, msg| {
                     let msg = Message::binary(msg);
                     let _ = sink
-                        .start_send(msg)
+                        .poll_complete()
                         .map_err(|err| Error::new(ErrorKind::Other, err));
                     let _ = sink
-                        .poll_complete()
+                        .start_send(msg)
                         .map_err(|err| Error::new(ErrorKind::Other, err));
                     Ok(sink)
                 });
+
                 let connection = ws_reader
                     .map(|_| ())
                     .map_err(|_| ())
@@ -146,13 +158,25 @@ fn main() {
 
                 warp::spawn(connection);
 
+                /*
+                let mles_tx_inner = mles_tx.clone();
+                let timeout = Interval::new(Instant::now(), Duration::from_millis(5000))
+                    .for_each(move |instant| {
+                        let mles_tx = mles_tx_inner.clone();
+                        println!("fire; instant={:?}", instant);
+                        let _ = mles_tx.wait().send(Vec::new());
+                        Ok(())
+                    })
+                .map_err(|_| {});
+                warp::spawn(timeout);*/
+
                 client
             })
         }).with(warp::reply::with::header("Sec-WebSocket-Protocol", "mles-websocket"));
 
     let routes = ws.or(index);
 
-    warp::serve(routes).run(([0, 0, 0, 0], 80));
+    warp::serve(routes).run(([0, 0, 0, 0], 8080));
 }
 struct Bytes;
 
