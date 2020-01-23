@@ -56,14 +56,12 @@ fn main() {
                 let (mles_tx, mles_rx) = unbounded();
 
                 let tcp = TcpStream::connect(&raddr);
+                let mles_tx_inner = mles_tx.clone();
                 let client = tcp
                     .and_then(move |stream| {
                         let _val = stream
                             .set_nodelay(true)
                             .map_err(|_| panic!("Cannot set to no delay"));
-                        let _val = stream
-                            .set_keepalive(Some(Duration::new(10, 0)))
-                            .map_err(|_| panic!("Cannot set keepalive"));
                         let laddr = match stream.local_addr() {
                             Ok(laddr) => laddr,
                             Err(_) => {
@@ -88,6 +86,7 @@ fn main() {
                         let mles_rx = mles_rx.map_err(|_| panic!()); // errors not possible on rx XXX
                         let mles_rx = mles_rx.and_then(move |buf: Vec<_>| {
                             if buf.is_empty() {
+                                println!("Empty buffer!");
                                 return Err(Error::new(ErrorKind::BrokenPipe, "broken pipe"));
                             }
                             if None == key {
@@ -109,10 +108,10 @@ fn main() {
                             let mut ws_tx_inner = ws_tx.clone();
                             // send to websocket
                             let _ = ws_tx_inner
-                                .poll_complete()
+                                .start_send(buf.to_vec())
                                 .map_err(|err| Error::new(ErrorKind::Other, err));
                             let _ = ws_tx_inner
-                                .start_send(buf.to_vec())
+                                .poll_complete()
                                 .map_err(|err| Error::new(ErrorKind::Other, err));
                             Ok(())
                         });
@@ -120,9 +119,9 @@ fn main() {
                         send_wsrx
                             .map(|_| ())
                             .select(write_wstx.map(|_| ()))
-                            .then(|_| Ok(()))
+                            .then(|_| { let _ = mles_tx_inner.wait().send(Vec::new()); println!("Client is down!"); Ok(()) } )
                     })
-                    .map_err(|_| {});
+                    .map_err(|_| { });
 
                 let (sink, stream) = websocket.split();
 
@@ -131,10 +130,10 @@ fn main() {
                     let mut mles_tx = mles_tx_inner.clone();
                     let mles_message = message.into_bytes();
                     let _ = mles_tx
-                        .poll_complete()
+                        .start_send(mles_message)
                         .map_err(|err| Error::new(ErrorKind::Other, err));
                     let _ = mles_tx
-                        .start_send(mles_message)
+                        .poll_complete()
                         .map_err(|err| Error::new(ErrorKind::Other, err));
                     Ok(())
                 });
@@ -142,10 +141,10 @@ fn main() {
                 let ws_writer = ws_rx.fold(sink, |mut sink, msg| {
                     let msg = Message::binary(msg);
                     let _ = sink
-                        .poll_complete()
+                        .start_send(msg)
                         .map_err(|err| Error::new(ErrorKind::Other, err));
                     let _ = sink
-                        .start_send(msg)
+                        .poll_complete()
                         .map_err(|err| Error::new(ErrorKind::Other, err));
                     Ok(sink)
                 });
@@ -153,30 +152,23 @@ fn main() {
                 let connection = ws_reader
                     .map(|_| ())
                     .map_err(|_| ())
-                    .select(ws_writer.map(|_| ()).map_err(|_| ()))
-                    .then(|_| Ok(()));
+                    .select(ws_writer.map(|_| ()).map_err(|_| ()));
+                    //.then(|_| { println!("Hou, proxy connection is dropped!");  Ok(()) });
+                    //
+                let connection_client = connection
+                    .map(|_| ())
+                    .map_err(|_| ())
+                    .select(client.map(|_| ())).then(|_| { println!("Client connection down!"); Ok(()) });
 
-                warp::spawn(connection);
+                //warp::spawn(connection);
 
-                /*
-                let mles_tx_inner = mles_tx.clone();
-                let timeout = Interval::new(Instant::now(), Duration::from_millis(5000))
-                    .for_each(move |instant| {
-                        let mles_tx = mles_tx_inner.clone();
-                        println!("fire; instant={:?}", instant);
-                        let _ = mles_tx.wait().send(Vec::new());
-                        Ok(())
-                    })
-                .map_err(|_| {});
-                warp::spawn(timeout);*/
-
-                client
+                connection_client
             })
         }).with(warp::reply::with::header("Sec-WebSocket-Protocol", "mles-websocket"));
 
     let routes = ws.or(index);
 
-    warp::serve(routes).run(([0, 0, 0, 0], 8080));
+    warp::serve(routes).run(([0, 0, 0, 0], 80));
 }
 struct Bytes;
 
