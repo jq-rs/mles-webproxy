@@ -18,6 +18,7 @@ use futures::prelude::*;
 use tokio::timer::{Delay, Interval};
 use std::time::{Duration, Instant};
 use mles_utils::*;
+use tokio::runtime::current_thread::Runtime;
 
 mod acme;
 
@@ -29,6 +30,7 @@ fn main() {
         let _ = acme::lets_encrypt(index_https, "jq-rs@mles.io", "mles.io");
     });
     */
+    let mut runtime = Runtime::new().unwrap();
 
     let index = warp::fs::dir("/home/ubuntu/www/arki-server/static");
     println!("Starting Mles Websocket proxy...");
@@ -166,9 +168,18 @@ fn main() {
             })
         }).with(warp::reply::with::header("Sec-WebSocket-Protocol", "mles-websocket"));
 
-    let routes = ws.or(index);
+    //let routes = ws.or(index);
+    let routes = ws;
 
-    warp::serve(routes).run(([0, 0, 0, 0], 80));
+    let warp = warp::serve(routes).bind(([0, 0, 0, 0], 80));
+    runtime.spawn(warp);
+
+    match runtime.run() {
+        Ok(_) => {}
+        Err(err) => {
+            println!("Error: {}", err);
+        }
+    };
 }
 struct Bytes;
 
