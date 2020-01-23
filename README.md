@@ -18,8 +18,8 @@ Arki-server is an Mles WebSocket proxy service for [Mles](https://github.com/jq-
     - `sysctl -p` (apply changes)
  7. Startup arki-server websocket proxy in your local server: `MLES_KEY=<secket-key-string-here> target/release/arki-server`
      - default port 80 may need root privileges
- 8. Connect to port 80 of your local server with Mles Websocket application
- 9. Open port 80 of your firewall for Mles WebSocket protocol, if you plan to connect from outer world
+ 8. Open port 80 of your firewall for Mles WebSocket protocol, if you plan to connect from outer world
+ 9. Connect to port 80 of your local server with Mles Websocket application
  
  Optional: You can configure with provided systemctl scripts the services to be started automatically on server reboot.
  
