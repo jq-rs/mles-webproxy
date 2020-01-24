@@ -18,7 +18,7 @@ use futures::prelude::*;
 use tokio::timer::{Delay, Interval};
 use std::time::{Duration, Instant};
 use mles_utils::*;
-use tokio::runtime::current_thread::Runtime;
+//use tokio::runtime::current_thread::Runtime;
 
 mod acme;
 
@@ -30,7 +30,7 @@ fn main() {
         let _ = acme::lets_encrypt(index_https, "jq-rs@mles.io", "mles.io");
     });
     */
-    let mut runtime = Runtime::new().unwrap();
+    //let mut runtime = Runtime::new().unwrap();
 
     let index = warp::fs::dir("/home/ubuntu/www/arki-server/static");
     println!("Starting Mles Websocket proxy...");
@@ -55,10 +55,9 @@ fn main() {
                 let mut keys = Vec::new();
 
                 let (ws_tx, ws_rx) = unbounded();
-                let (mles_tx, mles_rx) = unbounded();
+                let (mut mles_tx, mles_rx) = unbounded();
 
                 let tcp = TcpStream::connect(&raddr);
-                let mles_tx_inner = mles_tx.clone();
                 let client = tcp
                     .and_then(move |stream| {
                         let _val = stream
@@ -121,15 +120,13 @@ fn main() {
                         send_wsrx
                             .map(|_| ())
                             .select(write_wstx.map(|_| ()))
-                            .then(|_| { let _ = mles_tx_inner.wait().send(Vec::new()); println!("Client is down!"); Ok(()) } )
+                            .then(|_| Ok(()))
                     })
                     .map_err(|_| { });
 
                 let (sink, stream) = websocket.split();
 
-                let mles_tx_inner = mles_tx.clone();
                 let ws_reader = stream.for_each(move |message: Message| {
-                    let mut mles_tx = mles_tx_inner.clone();
                     let mles_message = message.into_bytes();
                     let _ = mles_tx
                         .start_send(mles_message)
@@ -168,18 +165,9 @@ fn main() {
             })
         }).with(warp::reply::with::header("Sec-WebSocket-Protocol", "mles-websocket"));
 
-    //let routes = ws.or(index);
-    let routes = ws;
+    let routes = ws.or(index);
 
-    let warp = warp::serve(routes).bind(([0, 0, 0, 0], 80));
-    runtime.spawn(warp);
-
-    match runtime.run() {
-        Ok(_) => {}
-        Err(err) => {
-            println!("Error: {}", err);
-        }
-    };
+    warp::serve(routes).run(([0, 0, 0, 0], 80));
 }
 struct Bytes;
 
