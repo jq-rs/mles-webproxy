@@ -54,7 +54,7 @@ fn main() {
                 let mut key: Option<u64> = None;
                 let mut keys = Vec::new();
 
-                let (ws_tx, ws_rx) = unbounded();
+                let (mut ws_tx, ws_rx) = unbounded();
                 let (mut mles_tx, mles_rx) = unbounded();
 
                 let tcp = TcpStream::connect(&raddr);
@@ -106,14 +106,14 @@ fn main() {
 
                         let send_wsrx = mles_rx.forward(sink);
                         let write_wstx = stream.for_each(move |buf| {
-                            let mut ws_tx_inner = ws_tx.clone();
+                            //let mut ws_tx_inner = ws_tx.clone();
                             // send to websocket
-                            let _ = ws_tx_inner
-                                .start_send(buf.to_vec())
-                                .map_err(|err| Error::new(ErrorKind::Other, err));
-                            let _ = ws_tx_inner
-                                .poll_complete()
-                                .map_err(|err| Error::new(ErrorKind::Other, err));
+                            let _ = ws_tx
+                                .start_send(buf.to_vec());
+                                //.map_err(|err| Error::new(ErrorKind::Other, err));
+                            let _ = ws_tx
+                                .poll_complete();
+                                //.map_err(|err| Error::new(ErrorKind::Other, err));
                             Ok(())
                         });
 
@@ -126,42 +126,40 @@ fn main() {
 
                 let (sink, stream) = websocket.split();
 
-                let ws_reader = stream.for_each(move |message: Message| {
-                    let mles_message = message.into_bytes();
-                    let _ = mles_tx
-                        .start_send(mles_message)
-                        .map_err(|err| Error::new(ErrorKind::Other, err));
-                    let _ = mles_tx
-                        .poll_complete()
-                        .map_err(|err| Error::new(ErrorKind::Other, err));
-                    Ok(())
-                });
+                //std::thread::spawn(move || {
+                    let ws_reader = stream.for_each(move |message: Message| {
+                        let mles_message = message.into_bytes();
+                        let _ = mles_tx
+                            .start_send(mles_message);
+                            //.map_err(|err| Error::new(ErrorKind::Other, err));
+                        let _ = mles_tx
+                            .poll_complete();
+                            //.map_err(|err| Error::new(ErrorKind::Other, err));
+                        Ok(())
+                    });
+                    let ws_writer = ws_rx.fold(sink, |mut sink, msg| {
+                        let msg = Message::binary(msg);
+                        let _ = sink
+                            .start_send(msg);
+                            //.map_err(|err| Error::new(ErrorKind::Other, err));
+                        let _ = sink
+                            .poll_complete();
+                            //.map_err(|err| Error::new(ErrorKind::Other, err));
+                        Ok(sink)
+                    });
 
-                let ws_writer = ws_rx.fold(sink, |mut sink, msg| {
-                    let msg = Message::binary(msg);
-                    let _ = sink
-                        .start_send(msg)
-                        .map_err(|err| Error::new(ErrorKind::Other, err));
-                    let _ = sink
-                        .poll_complete()
-                        .map_err(|err| Error::new(ErrorKind::Other, err));
-                    Ok(sink)
-                });
+                    let connection = ws_reader
+                        .map(|_| ())
+                        .map_err(|_| ())
+                        .select(ws_writer.map(|_| ()).map_err(|_| ()))
+                    .then(|_| { println!("Hou, proxy connection is dropped!");  Ok(()) });
 
-                let connection = ws_reader
-                    .map(|_| ())
-                    .map_err(|_| ())
-                    .select(ws_writer.map(|_| ()).map_err(|_| ()));
-                    //.then(|_| { println!("Hou, proxy connection is dropped!");  Ok(()) });
-                    //
-                let connection_client = connection
-                    .map(|_| ())
-                    .map_err(|_| ())
-                    .select(client.map(|_| ())).then(|_| { println!("Client connection down!"); Ok(()) });
-
-                //warp::spawn(connection);
-
-                connection_client
+                    //tokio::run(connection);
+                //});
+                //
+                warp::spawn(connection);
+                    
+                client
             })
         }).with(warp::reply::with::header("Sec-WebSocket-Protocol", "mles-websocket"));
 
