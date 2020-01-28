@@ -8,7 +8,7 @@ edition = "2018"
 tokio = "0.1"
 futures = "0.1"
 acme-lib = "0.5"
-warp = { version = "0.1", features = ["tls"] }
+warp = { path = "warp", features = ["tls"] }
 tokio-io = "0.1"
 mles-utils = "1.1.0"
 bytes = "0.4"

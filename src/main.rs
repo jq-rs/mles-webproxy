@@ -52,11 +52,11 @@ fn main() {
                 let mut cid: Option<u32> = None;
                 let mut key: Option<u64> = None;
                 let mut keys = Vec::new();
+                let mut cid_val = 0;
 
                 let (mut ws_tx, ws_rx) = unbounded();
                 let (mut mles_tx, mles_rx) = unbounded();
 
-                std::thread::spawn(move || {
                     let tcp = TcpStream::connect(&raddr);
                     let client = tcp
                         .and_then(move |stream| {
@@ -97,12 +97,15 @@ fn main() {
                                     keys.push(decoded_message.get_channel().to_string());
                                     key = Some(MsgHdr::do_hash(&keys));
                                     cid = Some(MsgHdr::select_cid(key.unwrap()));
+                                    cid_val = cid.unwrap();
+                                    println!("Adding cid {:x}", cid.unwrap());
                                 }
                                 let msghdr = MsgHdr::new(buf.len() as u32, cid.unwrap(), key.unwrap());
                                 let mut msgv = msghdr.encode();
                                 msgv.extend(buf);
                                 Ok(msgv)
                             });
+
 
                             let ws_tx_inner = ws_tx.clone();
                             let send_wsrx = mles_rx.forward(sink);
@@ -119,13 +122,29 @@ fn main() {
                             send_wsrx
                                 .map(|_| ())
                                 .select(write_wstx.map(|_| ()))
-                                .then(|_| { println!("Hey, dropping client"); Err(Error::new(ErrorKind::BrokenPipe, "broken pipe")) })
+                                .then(|_| {
+                                    println!("Hey, dropping client"); Err(Error::new(ErrorKind::BrokenPipe, "broken pipe")) })
                         })
-                    .map_err(|_| { println!("Client dropped"); });
-                    tokio::run(client);
-                });
+                    .map_err(move |_| { println!("Client dropped {}", cid_val); });
 
-                let (sink, stream) = websocket.split();
+                    warp::spawn(client);
+
+                let (mut sink, stream) = websocket.split();
+
+
+                /*
+                let when = Duration::from_millis(15000);
+                let task = Interval::new_interval(when);
+
+                let sink_inner = sink.clone();
+                let task = task.for_each(|_| {
+                        sink_inner.wait().send(Message::ping(Vec::new()));
+                        Ok(())
+                    })
+                .map_err(|e| panic!("delay errored; err={:?}", e));
+
+                warp::spawn(task);
+*/
 
                 let mut mles_tx_inner = mles_tx.clone();
                     let ws_reader = stream.for_each(move |message: Message| {
@@ -164,7 +183,7 @@ fn main() {
 
     let routes = ws.or(index);
 
-    warp::serve(routes).run(([0, 0, 0, 0], 80));
+    warp::serve(routes).run(([0, 0, 0, 0], 8080));
 }
 struct Bytes;
 
