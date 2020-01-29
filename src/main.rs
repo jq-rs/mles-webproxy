@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use bytes::BytesMut;
 use tokio::net::TcpStream;
 use tokio_io::codec::Decoder;
-use std::env;
+use std::{env, process};
 use std::io::{self};
 use tokio_io::codec::{Encoder as TokioEncoder, Decoder as TokioDecoder};
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -22,18 +22,48 @@ mod acme;
 
 const KEEPALIVE: u64 = 5;
 const ACCEPTED_PROTOCOL: &str = "mles-websocket";
+const USAGE: &str = "Usage: arkiserver <www-directory> <email> <domain>";
 
 fn main() {
+    let mut www_root_dir = "".to_string();
+    let mut email = "".to_string();
+    let mut domain = "".to_string();
 
-    std::thread::spawn(|| {
-        let index_https = warp::fs::dir("/home/ubuntu/www/arki-server/static");
+    println!("Starting Mles Websocket proxy...");
+    for (argcnt, item) in env::args().enumerate() {
+        if argcnt > 3 {
+            println!("{}", USAGE);
+            process::exit(1);
+        }
+        if argcnt == 1 {
+            println!("WWW root directory: {}", item);
+            www_root_dir = item.clone();
+        }
+        if argcnt == 2 {
+            println!("Email: {}", item);
+            email = item.clone();
+        }
+        if argcnt == 3 {
+            println!("Domain: {}", item);
+            domain = item.clone();
+        }
+    }
+    if www_root_dir.len() == 0 ||
+       email.len() == 0 ||
+       domain.len() == 0 {
+           println!("{}", USAGE);
+           process::exit(1);
+       }
+
+    let www_root = www_root_dir.clone();
+    std::thread::spawn(move || {
+        let index_https = warp::fs::dir(www_root);
         println!("Spawning https-site!");
-        let _ = acme::lets_encrypt(index_https, "jq-rs@mles.io", "mles.io");
+        let _ = acme::lets_encrypt(index_https, &email, &domain);
     });
 
     //let mut runtime = Runtime::new().unwrap();
-    let index = warp::fs::dir("/home/ubuntu/www/arki-server/static");
-    println!("Starting Mles Websocket proxy...");
+    let index = warp::fs::dir(www_root_dir);
     let ws = warp::ws2().and(warp::header::exact("Sec-WebSocket-Protocol", ACCEPTED_PROTOCOL))
         .map(|ws: warp::ws::Ws2| {
             // And then our closure will be called when it completes...
