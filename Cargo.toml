@@ -1,19 +1,15 @@
 [package]
 name = "arki-server"
-version = "0.2.5"
+version = "0.3.0"
 authors = ["jq-rs"]
 edition = "2018"
 
 [dependencies]
 tokio = "0.1"
-tokio-io = "0.1"
-tokio-core = "0.1"
 futures = "0.1"
-tk-bufstream = "0.3"
-netbuf = "0.3"
-tk-http = "0.3"
-tk-listen = "0.1"
-lazy_static = "1.0"
-fnv = "1.0.0"
+acme-lib = "0.5"
+warp = { path = "warp", features = ["tls"] }
+tokio-io = "0.1"
 mles-utils = "1.1.0"
 bytes = "0.4"
+x509-parser = "0.6"
