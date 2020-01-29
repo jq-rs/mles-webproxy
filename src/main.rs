@@ -1,5 +1,5 @@
 use warp::{Filter, Future, Stream};
-use warp::Message;
+use warp::filters::ws::Message;
 
 use futures::Sink;
 use futures::sync::mpsc::unbounded;
@@ -24,13 +24,13 @@ const KEEPALIVE: u64 = 5;
 const ACCEPTED_PROTOCOL: &str = "mles-websocket";
 
 fn main() {
-    /*
+
     std::thread::spawn(|| {
         let index_https = warp::fs::dir("/home/ubuntu/www/arki-server/static");
         println!("Spawning https-site!");
         let _ = acme::lets_encrypt(index_https, "jq-rs@mles.io", "mles.io");
     });
-    */
+
     //let mut runtime = Runtime::new().unwrap();
     let index = warp::fs::dir("/home/ubuntu/www/arki-server/static");
     println!("Starting Mles Websocket proxy...");
