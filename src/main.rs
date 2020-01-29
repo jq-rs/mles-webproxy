@@ -1,7 +1,5 @@
-
-//use futures::sync::oneshot;
 use warp::{Filter, Future, Stream};
-use warp::filters::ws::Message;
+use warp::Message;
 
 use futures::Sink;
 use futures::sync::mpsc::unbounded;
@@ -21,7 +19,9 @@ use std::time::Duration;
 use mles_utils::*;
 
 mod acme;
+
 const KEEPALIVE: u64 = 5;
+const ACCEPTED_PROTOCOL: &str = "mles-websocket";
 
 fn main() {
     /*
@@ -34,7 +34,7 @@ fn main() {
     //let mut runtime = Runtime::new().unwrap();
     let index = warp::fs::dir("/home/ubuntu/www/arki-server/static");
     println!("Starting Mles Websocket proxy...");
-    let ws = warp::ws2().and(warp::header::exact("Sec-WebSocket-Protocol", "mles-websocket"))
+    let ws = warp::ws2().and(warp::header::exact("Sec-WebSocket-Protocol", ACCEPTED_PROTOCOL))
         .map(|ws: warp::ws::Ws2| {
             // And then our closure will be called when it completes...
             ws.on_upgrade(|websocket| {
