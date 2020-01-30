@@ -27,7 +27,7 @@ var initOk = false;
 const RETIMEOUT = 1500; /* ms */
 const MAXTIMEOUT = 1000*60*5; /* ms */
 const MAXQLEN = 32;
-const RESYNC_TIMEOUT = 5000; /* ms */
+const RESYNC_TIMEOUT = 15000; /* ms */
 var reconn_timeout = RETIMEOUT;
 var reconn_attempts = 0;
 
@@ -296,7 +296,7 @@ function ask_channel() {
 				window.localStorage.setItem('addrportinput', addrportinput);
 			}
 			else {
-				window.localStorage.setItem('addrportinput', "mles.io:80");
+				window.localStorage.setItem('addrportinput', "mles.io:443");
 			}
 
 			//add to local storage
@@ -318,7 +318,7 @@ function ask_channel() {
 				myaddr = 'mles.io';
 			}
 			if(myport == '') {
-				myport = '80';
+				myport = '443';
 			}
 
 			$('#name_channel_cont').fadeOut(400, function() {
@@ -804,7 +804,7 @@ function send_image(myname, mychannel, file) {
 }
 
 function get_token() {
-	return "http://" + addrportinput + "/web?token=" + token;
+	return "https://" + addrportinput + "/web?token=" + token;
 }
 
 function get_front() {
@@ -815,11 +815,11 @@ function get_front() {
 
 function get_local_addrportinput() {
 	var apinput = window.localStorage.getItem('addrportinput');
-	if(apinput != undefined && apinput != '') {
+	if(apinput != undefined && apinput != '' && apinput != 'mles.io:80') {
 		return apinput;
 	}
 	else {
-		return "mles.io:80";
+		return "mles.io:443";
 	}
 }
 

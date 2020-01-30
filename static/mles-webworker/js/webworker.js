@@ -175,7 +175,7 @@ function open_socket(myport, myaddr, uid, channel) {
 		return;
 	}
 
-	webSocket = new WebSocket("ws://" + myaddr + ":" + myport
+	webSocket = new WebSocket("wss://" + myaddr + ":" + myport
 		+ "?myname=" + uid
 		+ "&mychannel=" + channel, "mles-websocket");
 	webSocket.binaryType = "arraybuffer";
