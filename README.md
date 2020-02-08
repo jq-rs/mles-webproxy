@@ -20,7 +20,7 @@ Arki-server is an Mles WebSocket proxy service for [Mles](https://github.com/jq-
  
  ## Available public proxy servers
  
-   * http://mles.io:80
+   * https://mles.io:443
    * \<add your public server here\>
  
  P.S. Please send a PR if some of this info is outdated.
