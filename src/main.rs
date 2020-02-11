@@ -1,6 +1,7 @@
 use warp::{path, Filter, Future, Stream};
 use warp::filters::ws::Message;
 use futures::sync::oneshot;
+use std::thread;
 
 use futures::Sink;
 use futures::sync::mpsc::unbounded;
@@ -15,6 +16,8 @@ use tokio_io::codec::{Encoder as TokioEncoder, Decoder as TokioDecoder};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use std::str::FromStr;
+
 use tokio::timer::Interval;
 use std::time::Duration;
 use mles_utils::*;
@@ -22,7 +25,9 @@ use mles_utils::*;
 const KEEPALIVE: u64 = 5;
 const ACCEPTED_PROTOCOL: &str = "mles-websocket";
 const USAGE: &str = "Usage: arkiserver <www-directory> <email> <domain>";
-const TMIN: std::time::Duration = std::time::Duration::from_secs(59 * 60 * 24 * 30);
+const ADAY: Duration = Duration::from_secs(60 * 60 * 24);
+const AMONTH: Duration = Duration::from_secs(60 * 60 * 24 * 30);
+const SRV_ADDR: &str = "127.0.0.1:8077";
 
 fn main() {
     let mut www_root_dir = "".to_string();
@@ -55,139 +60,21 @@ fn main() {
            process::exit(1);
        }
 
-    let www_root = www_root_dir.clone();
-
-    let domain = domain.to_string();
-
     let pem_name = format!("{}.pem", domain);
     let key_name = format!("{}.key", domain);
 
-    // Use DirectoryUrl::LetsEncrypStaging for dev/testing.
-    let url = acme_lib::DirectoryUrl::LetsEncrypt;
-
-    // Save/load keys and certificates to current dir.
-    let persist = acme_lib::persist::FilePersist::new(".");
-
-    // Create a directory entrypoint.
-    let dir = acme_lib::Directory::from_url(persist, url).unwrap();
-
-    // Reads the private account key from persistence, or
-    // creates a new one before accessing the API to establish
-    // that it's there.
-    let acc = dir.account(&email).unwrap();
-
-    // Order a new TLS certificate for a domain.
-    let mut ord_new = acc.new_order(&domain, &[]).unwrap();
-
-    // Run forever on the current thread, serving using TLS to serve on the given domain.
-    // Serves port 80 and port 443.  It obtains TLS credentials from
-    // `letsencrypt.org` and then serves up the site on port 443. It
-    // also serves redirects on port 80.
     loop {
-        println!(
-            "The time to expiration of {:?} is {:?}",
-            pem_name,
-            time_to_expiration(&pem_name)
-            );
-        if time_to_expiration(&pem_name)
-            .filter(|&t| t > TMIN)
-                .is_none()
-                {
-                    // If the ownership of the domain(s) have already been authorized
-                    // in a previous order, you might be able to skip validation. The
-                    // ACME API provider decides.
-                    let ord_csr = loop {
-                        // are we done?
-                        if let Some(ord_csr) = ord_new.confirm_validations() {
-                            break ord_csr;
-                        }
+        let res = request_cert(&domain, &email, &pem_name, &key_name);
+        match res {
+            Err(err) => { println!("Cert err: {}", err); },
+            Ok(_) => { println!("Cert ok!"); }
+        }
 
-                        // XXX Fix unwraps..
-
-                        // Get the possible authorizations (for a single domain
-                        // this will only be one element).
-                        let auths = ord_new.authorizations().unwrap();
-
-                        // For HTTP, the challenge is a text file that needs to
-                        // be placed in your web server's root:
-                        //
-                        // /var/www/.well-known/acme-challenge/<token>
-                        //
-                        // The important thing is that it's accessible over the
-                        // web for the domain(s) you are trying to get a
-                        // certificate for:
-                        //
-                        // http://mydomain.io/.well-known/acme-challenge/<token>
-                        let chall = auths[0].http_challenge();
-
-                        // The token is the filename.
-                        let token = Box::leak(chall.http_token().to_string().into_boxed_str());
-                        // The proof is the contents of the file
-                        let proof = chall.http_proof();
-
-                        // Here you must do "something" to place
-                        // the file/contents in the correct place.
-                        // update_my_web_server(&path, &proof);
-                        let domain = domain.to_string();
-                        use std::str::FromStr;
-                        let token = warp::path!(".well-known" / "acme-challenge")
-                            .and(warp::path(token))
-                            .map(move || proof.clone());
-                        let redirect = warp::path::tail().map(move |path: warp::path::Tail| {
-                            warp::redirect::redirect(
-                                warp::http::Uri::from_str(&format!(
-                                        "https://{}/{}",
-                                        &domain,
-                                        path.as_str()
-                                        ))
-                                .expect("problem with uri?"),
-                                )
-                        });
-                        let (tx80, rx80) = oneshot::channel();
-                        std::thread::spawn(|| {
-                            tokio::run(warp::serve(token.or(redirect))
-                                       .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80)
-                                       .1);
-                        });
-
-                        // After the file is accessible from the web, the calls
-                        // this to tell the ACME API to start checking the
-                        // existence of the proof.
-                        //
-                        // The order at ACME will change status to either
-                        // confirm ownership of the domain, or fail due to the
-                        // not finding the proof. To see the change, we poll
-                        // the API with 5000 milliseconds wait between.
-                        chall.validate(5000).unwrap();
-                        tx80.send(()).unwrap(); // Now stop the server on port 80
-
-                        // Update the state against the ACME API.
-                        ord_new.refresh().unwrap();
-                    };
-
-                    // Ownership is proven. Create a private/public key pair for the
-                    // certificate. These are provided for convenience, you can
-                    // provide your own keypair instead if you want.
-                    let (pkey_pri, pkey_pub) = acme_lib::create_p384_key();
-
-                    // Submit the CSR. This causes the ACME provider to enter a state
-                    // of "processing" that must be polled until the certificate is
-                    // either issued or rejected. Again we poll for the status change.
-                    let ord_cert =
-                        ord_csr.finalize_pkey(pkey_pri, pkey_pub, 5000).unwrap();
-
-                    // Now download the certificate. Also stores the cert in the
-                    // persistence.
-                    let cert = ord_cert.download_and_save_cert().unwrap();
-                    std::fs::write(&pem_name, cert.certificate()).unwrap();
-                    std::fs::write(&key_name, cert.private_key()).unwrap();
-                }
         // Now we have working keys, let us use them!
         let (tx80, rx80) = oneshot::channel();
         {
             // First start the redirecting from port 80 to port 443.
-            let domain = domain.to_string();
-            use std::str::FromStr;
+            let domain = domain.clone();
             let redirect = warp::path::tail().map(move |path: warp::path::Tail| {
                 warp::redirect::redirect(
                     warp::http::Uri::from_str(&format!(
@@ -198,14 +85,15 @@ fn main() {
                     .expect("problem with uri?"),
                     )
             });
-            std::thread::spawn(|| {
-                tokio::run(warp::serve(redirect)
-                           .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80)
-                           .1);
+
+            let (_, server) = warp::serve(redirect)
+                .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
+            thread::spawn( || {
+                tokio::run(server);
             });
         }
 
-        let www_root_inner = www_root.clone();
+        let www_root_inner = www_root_dir.clone();
         let (tx, rx) = oneshot::channel();
         {
             /* Run port 443 service */
@@ -215,225 +103,34 @@ fn main() {
                 .map(|ws: warp::ws::Ws2| {
                     // And then our closure will be called when it completes...
                     ws.on_upgrade(|websocket| {
-                        let raddr = "127.0.0.1:8077".parse().unwrap();
-
-                        let keyval = match env::var("MLES_KEY") {
-                            Ok(val) => val,
-                            Err(_) => "".to_string(),
-                        };
-
-                        let keyaddr = match env::var("MLES_ADDR_KEY") {
-                            Ok(val) => val,
-                            Err(_) => "".to_string(),
-                        };
-
-                        let ping_cntr = Arc::new(AtomicUsize::new(0));
-                        let pong_cntr = Arc::new(AtomicUsize::new(0));
-
-                        let mut cid: Option<u32> = None;
-                        let mut key: Option<u64> = None;
-                        let mut keys = Vec::new();
-                        let mut cid_val = 0;
-
-                        let (mut ws_tx, ws_rx) = unbounded();
-                        let (mut mles_tx, mles_rx) = unbounded();
-                        let (mut combined_tx, combined_rx) = unbounded();
-
-                        let tcp = TcpStream::connect(&raddr);
-                        let client = tcp
-                            .and_then(move |stream| {
-                                let _val = stream
-                                    .set_nodelay(true)
-                                    .map_err(|_| panic!("Cannot set to no delay"));
-                                let _val = stream
-                                    .set_keepalive(Some(Duration::new(KEEPALIVE, 0)))
-                                    .map_err(|_| panic!("Cannot set keepalive"));
-                                let laddr = match stream.local_addr() {
-                                    Ok(laddr) => laddr,
-                                    Err(_) => {
-                                        let addr = "0.0.0.0:0";
-                                        addr.parse::<SocketAddr>().unwrap()
-                                    }
-                                };
-                                let keyval_inner = keyval.clone();
-                                let keyaddr_inner = keyaddr.clone();
-
-                                if !keyval_inner.is_empty() {
-                                    keys.push(keyval_inner);
-                                } else {
-                                    keys.push(MsgHdr::addr2str(&laddr));
-                                    if !keyaddr_inner.is_empty() {
-                                        keys.push(keyaddr_inner);
-                                    }
-                                }
-
-                                let (tcp_sink, tcp_stream) = Bytes.framed(stream).split();
-
-                                let mles_rx = mles_rx.map_err(|_| panic!()); // errors not possible on rx XXX
-                                let mles_rx = mles_rx.and_then(move |buf: Vec<_>| {
-                                    if buf.is_empty() {
-                                        //println!("Empty buffer!");
-                                        return Err(Error::new(ErrorKind::BrokenPipe, "broken pipe"));
-                                    }
-                                    if None == key {
-                                        //create hash for verification
-                                        let decoded_message = Msg::decode(buf.as_slice());
-                                        keys.push(decoded_message.get_uid().to_string());
-                                        keys.push(decoded_message.get_channel().to_string());
-                                        key = Some(MsgHdr::do_hash(&keys));
-                                        cid = Some(MsgHdr::select_cid(key.unwrap()));
-                                        cid_val = cid.unwrap();
-                                        println!("Adding TLS client with cid {:x}", cid.unwrap());
-                                    }
-                                    let msghdr = MsgHdr::new(buf.len() as u32, cid.unwrap(), key.unwrap());
-                                    let mut msgv = msghdr.encode();
-                                    msgv.extend(buf);
-                                    Ok(msgv)
-                                });
-
-
-                                let send_wsrx = mles_rx.forward(tcp_sink);
-                                let write_wstx = tcp_stream.for_each(move |buf| {
-                                    // send to websocket
-                                    let _ = ws_tx.start_send(buf.to_vec())
-                                        .map_err(|err| Error::new(ErrorKind::Other, err));
-                                    let _ = ws_tx.poll_complete()
-                                        .map_err(|err| Error::new(ErrorKind::Other, err));
-                                    Ok(())
-                                });
-
-                                send_wsrx
-                                    .map(|_| ())
-                                    .select(write_wstx.map(|_| ()))
-                                    .then(|_| Ok(()))
-                            })
-                        .map_err(move |_| { });
-
-
-                        let (sink, stream) = websocket.split();
-
-                        let when = Duration::from_millis(12000);
-                        let task = Interval::new_interval(when);
-
-                        let ping_cntr_inner = ping_cntr.clone();
-                        let pong_cntr_inner = pong_cntr.clone();
-                        let mut mles_tx_inner = mles_tx.clone();
-                        let mut combined_tx_inner = combined_tx.clone();
-                        let task = task.for_each(move |_| {
-                            let prev_ping_cnt = ping_cntr_inner.fetch_add(1, Ordering::Relaxed);
-                            let pong_cnt = pong_cntr_inner.load(Ordering::Relaxed);
-                            if pong_cnt + 1 < prev_ping_cnt {
-                                println!("Dropping inactive TLS connection..");
-                                let _ = mles_tx_inner.start_send(Vec::new())
-                                    .map_err(|err| Error::new(ErrorKind::Other, err));
-                                let _ = mles_tx_inner.poll_complete()
-                                    .map_err(|err| Error::new(ErrorKind::Other, err));
-                            }
-                            let _  = combined_tx_inner.start_send(Message::ping(Vec::new()))
-                                .map_err(|err| Error::new(ErrorKind::Other, err));
-                            let _ = combined_tx_inner.poll_complete()
-                                .map_err(|err| Error::new(ErrorKind::Other, err));
-                            Ok(())
-                        })
-                        .map_err(|e| panic!("delay errored; err={:?}", e));
-
-                        let ws_reader = stream.for_each(move |message: Message| {
-                            if message.is_pong() {
-                                let _ = pong_cntr.fetch_add(1, Ordering::Relaxed);
-                            }
-                            else {
-                                let mles_message = message.into_bytes();
-                                let _ = mles_tx
-                                    .start_send(mles_message)
-                                    .map_err(|err| Error::new(ErrorKind::Other, err));
-                                let _ = mles_tx
-                                    .poll_complete()
-                                    .map_err(|err| Error::new(ErrorKind::Other, err));
-                            }
-                            Ok(())
-                        });
-
-                        let tcp_to_ws_writer = ws_rx.for_each(move |msg: Vec<_>| {
-                            let msg = Message::binary(msg);
-                            let _ = combined_tx
-                                .start_send(msg)
-                                .map_err(|err| Error::new(ErrorKind::Other, err));
-                            let _ = combined_tx
-                                .poll_complete()
-                                .map_err(|err| Error::new(ErrorKind::Other, err));
-                            Ok(())
-                        });
-
-                        let ws_writer = combined_rx.fold(sink, |mut sink, msg| {
-                            let _ = sink
-                                .start_send(msg)
-                                .map_err(|err| Error::new(ErrorKind::Other, err));
-                            let _ = sink
-                                .poll_complete()
-                                .map_err(|err| Error::new(ErrorKind::Other, err));
-                            Ok(sink)
-                        });
-
-                        let connection = ws_reader
-                            .map(|_| ())
-                            .map_err(|_| ())
-                            .select(ws_writer.map(|_| ()).map_err(|_| ()));
-
-                        let conn_with_task = connection
-                            .map(|_| ())
-                            .map_err(|_| ())
-                            .select(task.map(|_| ()).map_err(|_| ()));
-
-                        let conn_with_task_and_tcp = conn_with_task
-                            .map(|_| ())
-                            .map_err(|_| ())
-                            .select(tcp_to_ws_writer.map(|_| ()).map_err(|_| ()));
-
-                        let connection = conn_with_task_and_tcp 
-                            .map(|_| ())
-                            .map_err(|_| ())
-                            .select(client.map(|_| ()).map_err(|_| ()))
-                            .then(|_| { println!("Exit of an client"); Ok(()) });
-                        connection
+                        run_websocket_proxy(websocket)
                     })
                 }).with(warp::reply::with::header("Sec-WebSocket-Protocol", "mles-websocket"));
 
             let tlsroutes = ws.or(index);
 
-            let pem_name = format!("{}.pem", domain);
-            let key_name = format!("{}.key", domain);
+            let (_, server) = warp::serve(tlsroutes)
+                .tls(&pem_name, &key_name)
+                .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), rx);
 
-            std::thread::spawn(move || {
-                tokio::run(warp::serve(tlsroutes)
-                           .tls(&pem_name, &key_name)
-                           .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), rx)
-                           .1);
+            thread::spawn(|| {
+                tokio::run(server);
             });
         }
 
-        // Now wait until it is time to grab a new certificate.
-        if let Some(time_to_renew) = time_to_expiration(&pem_name).and_then(|x| x.checked_sub(TMIN))
-        {
-            println!("Sleeping for {:?} before renewing", time_to_renew);
-            std::thread::sleep(time_to_renew);
-            println!("Now it is time to renew!");
-            tx.send(()).unwrap();
-            tx80.send(()).unwrap();
-            std::thread::sleep(std::time::Duration::from_secs(1)); // XXX 
-        } else if let Some(time_to_renew) = time_to_expiration(&pem_name) {
-            // Presumably we already failed to renew, so let's
-            // just keep using our current certificate as long
-            // as we can!
-            println!("Sleeping for {:?} before renewing", time_to_renew);
-            std::thread::sleep(time_to_renew);
-            println!("Now it is time to renew!");
-            tx.send(()).unwrap();
-            tx80.send(()).unwrap();
-            std::thread::sleep(std::time::Duration::from_secs(1)); // XXX
-        } else {
-            println!("Waiting an half an hour before trying again...");
-            std::thread::sleep(std::time::Duration::from_secs(30 * 60));
+        let expire = expire_time(&pem_name);
+        if expire > AMONTH {
+            println!("Waiting for {:#?} before renewing", expire - AMONTH);
+            thread::sleep(expire - AMONTH);
         }
+        else {
+            println!("Waiting for {:#?} before renewing", ADAY);
+            thread::sleep(ADAY);
+        }
+        println!("Gracefully shutting down for cert renewal..");
+        tx80.send(()).unwrap();
+        tx.send(()).unwrap();
+        thread::sleep(Duration::from_secs(1));
     }
 
 }
@@ -488,6 +185,132 @@ impl TokioEncoder for Bytes {
     }
 }
 
+fn expire_time(pem_name: &str) -> Duration {
+    if let Some(time_to_renew) = time_to_expiration(&pem_name) {
+        return time_to_renew;
+    } 
+    ADAY
+}
+
+
+fn request_cert(domain: &str, email: &str, pem_name: &str, key_name: &str) -> Result<(), acme_lib::Error> {
+    let cert_time = expire_time(pem_name);
+
+    println!("Time to expire {:#?}", cert_time);
+        
+    if AMONTH > cert_time {
+        println!("Less than month, renewing..");
+
+        // Use DirectoryUrl::LetsEncrypStaging for dev/testing.
+        let url = acme_lib::DirectoryUrl::LetsEncrypt;
+
+        // Save/load keys and certificates to current dir.
+        let persist = acme_lib::persist::FilePersist::new(".");
+
+        // Create a directory entrypoint.
+        let dir = acme_lib::Directory::from_url(persist, url)?;
+
+        // Reads the private account key from persistence, or
+        // creates a new one before accessing the API to establish
+        // that it's there.
+        let acc = dir.account(&email)?;
+
+        // Order a new TLS certificate for a domain.
+        let mut ord_new = acc.new_order(&domain, &[])?;
+
+        // Run forever on the current thread, serving using TLS to serve on the given domain.
+        // Serves port 80 and port 443.  It obtains TLS credentials from
+        // `letsencrypt.org` and then serves up the site on port 443. It
+        // also serves redirects on port 80.
+        // If the ownership of the domain(s) have already been authorized
+        // in a previous order, you might be able to skip validation. The
+        // ACME API provider decides.
+        let ord_csr = loop {
+            // are we done?
+            if let Some(ord_csr) = ord_new.confirm_validations() {
+                break ord_csr;
+            }
+
+            // Get the possible authorizations (for a single domain
+            // this will only be one element).
+            let auths = ord_new.authorizations()?;
+
+            // For HTTP, the challenge is a text file that needs to
+            // be placed in your web server's root:
+            //
+            // /var/www/.well-known/acme-challenge/<token>
+            //
+            // The important thing is that it's accessible over the
+            // web for the domain(s) you are trying to get a
+            // certificate for:
+            //
+            // http://mydomain.io/.well-known/acme-challenge/<token>
+            let chall = auths[0].http_challenge();
+
+            // The token is the filename.
+            let token = Box::leak(chall.http_token().to_string().into_boxed_str());
+            // The proof is the contents of the file
+            let proof = chall.http_proof();
+
+            // Here you must do "something" to place
+            // the file/contents in the correct place.
+            // update_my_web_server(&path, &proof);
+            let domain = domain.to_string();
+            let token = warp::path!(".well-known" / "acme-challenge")
+                .and(warp::path(token))
+                .map(move || proof.clone());
+            let redirect = warp::path::tail().map(move |path: warp::path::Tail| {
+                warp::redirect::redirect(
+                    warp::http::Uri::from_str(&format!(
+                            "https://{}/{}",
+                            &domain,
+                            path.as_str()
+                            ))
+                    .expect("problem with uri?"),
+                    )
+            });
+            let (tx80, rx80) = oneshot::channel();
+            thread::spawn(|| {
+                tokio::run(warp::serve(token.or(redirect))
+                           .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80)
+                           .1);
+            });
+
+            // After the file is accessible from the web, the calls
+            // this to tell the ACME API to start checking the
+            // existence of the proof.
+            //
+            // The order at ACME will change status to either
+            // confirm ownership of the domain, or fail due to the
+            // not finding the proof. To see the change, we poll
+            // the API with 5000 milliseconds wait between.
+            chall.validate(5000)?;
+            tx80.send(()).unwrap(); // Now stop the server on port 80
+
+            // Update the state against the ACME API.
+            ord_new.refresh()?;
+        };
+
+        // Ownership is proven. Create a private/public key pair for the
+        // certificate. These are provided for convenience, you can
+        // provide your own keypair instead if you want.
+        let pkey_pri = acme_lib::create_p384_key();
+
+        // Submit the CSR. This causes the ACME provider to enter a state
+        // of "processing" that must be polled until the certificate is
+        // either issued or rejected. Again we poll for the status change.
+        let ord_cert =
+            ord_csr.finalize_pkey(pkey_pri, 5000)?;
+
+        // Now download the certificate. Also stores the cert in the
+        // persistence.
+        let cert = ord_cert.download_and_save_cert()?;
+        std::fs::write(&pem_name, cert.certificate())?;
+        std::fs::write(&key_name, cert.private_key())?;
+    }
+    Ok(())
+}
+
 fn time_to_expiration<P: AsRef<std::path::Path>>(p: P) -> Option<std::time::Duration> {
     let file = std::fs::File::open(p).ok()?;
     x509_parser::pem::Pem::read(std::io::BufReader::new(file))
@@ -498,4 +321,187 @@ fn time_to_expiration<P: AsRef<std::path::Path>>(p: P) -> Option<std::time::Dura
         .tbs_certificate
         .validity
         .time_to_expiration()
+}
+
+fn run_websocket_proxy(websocket: warp::ws::WebSocket) -> impl Future<Item = (), Error = ()> + Send + 'static {
+    let raddr = SRV_ADDR.parse().unwrap();
+
+    let keyval = match env::var("MLES_KEY") {
+        Ok(val) => val,
+        Err(_) => "".to_string(),
+    };
+
+    let keyaddr = match env::var("MLES_ADDR_KEY") {
+        Ok(val) => val,
+        Err(_) => "".to_string(),
+    };
+
+    let ping_cntr = Arc::new(AtomicUsize::new(0));
+    let pong_cntr = Arc::new(AtomicUsize::new(0));
+
+    let mut cid: Option<u32> = None;
+    let mut key: Option<u64> = None;
+    let mut keys = Vec::new();
+    let mut cid_val = 0;
+
+    let (mut ws_tx, ws_rx) = unbounded();
+    let (mut mles_tx, mles_rx) = unbounded();
+    let (mut combined_tx, combined_rx) = unbounded();
+
+    let tcp = TcpStream::connect(&raddr);
+    let client = tcp
+        .and_then(move |stream| {
+            let _val = stream
+                .set_nodelay(true)
+                .map_err(|_| panic!("Cannot set to no delay"));
+            let _val = stream
+                .set_keepalive(Some(Duration::new(KEEPALIVE, 0)))
+                .map_err(|_| panic!("Cannot set keepalive"));
+            let laddr = match stream.local_addr() {
+                Ok(laddr) => laddr,
+                Err(_) => {
+                    let addr = "0.0.0.0:0";
+                    addr.parse::<SocketAddr>().unwrap()
+                }
+            };
+            let keyval_inner = keyval.clone();
+            let keyaddr_inner = keyaddr.clone();
+
+            if !keyval_inner.is_empty() {
+                keys.push(keyval_inner);
+            } else {
+                keys.push(MsgHdr::addr2str(&laddr));
+                if !keyaddr_inner.is_empty() {
+                    keys.push(keyaddr_inner);
+                }
+            }
+
+            let (tcp_sink, tcp_stream) = Bytes.framed(stream).split();
+
+            let mles_rx = mles_rx.map_err(|_| panic!()); // errors not possible on rx XXX
+            let mles_rx = mles_rx.and_then(move |buf: Vec<_>| {
+                if buf.is_empty() {
+                    //println!("Empty buffer!");
+                    return Err(Error::new(ErrorKind::BrokenPipe, "broken pipe"));
+                }
+                if None == key {
+                    //create hash for verification
+                    let decoded_message = Msg::decode(buf.as_slice());
+                    keys.push(decoded_message.get_uid().to_string());
+                    keys.push(decoded_message.get_channel().to_string());
+                    key = Some(MsgHdr::do_hash(&keys));
+                    cid = Some(MsgHdr::select_cid(key.unwrap()));
+                    cid_val = cid.unwrap();
+                    println!("Adding TLS client with cid {:x}", cid.unwrap());
+                }
+                let msghdr = MsgHdr::new(buf.len() as u32, cid.unwrap(), key.unwrap());
+                let mut msgv = msghdr.encode();
+                msgv.extend(buf);
+                Ok(msgv)
+            });
+
+
+            let send_wsrx = mles_rx.forward(tcp_sink);
+            let write_wstx = tcp_stream.for_each(move |buf| {
+                // send to websocket
+                let _ = ws_tx.start_send(buf.to_vec())
+                    .map_err(|err| Error::new(ErrorKind::Other, err));
+                let _ = ws_tx.poll_complete()
+                    .map_err(|err| Error::new(ErrorKind::Other, err));
+                Ok(())
+            });
+
+            send_wsrx
+                .map(|_| ())
+                .select(write_wstx.map(|_| ()))
+                .then(|_| Ok(()))
+        })
+    .map_err(move |_| { });
+
+
+    let (sink, stream) = websocket.split();
+
+    let when = Duration::from_millis(12000);
+    let task = Interval::new_interval(when);
+
+    let ping_cntr_inner = ping_cntr.clone();
+    let pong_cntr_inner = pong_cntr.clone();
+    let mut mles_tx_inner = mles_tx.clone();
+    let mut combined_tx_inner = combined_tx.clone();
+    let task = task.for_each(move |_| {
+        let prev_ping_cnt = ping_cntr_inner.fetch_add(1, Ordering::Relaxed);
+        let pong_cnt = pong_cntr_inner.load(Ordering::Relaxed);
+        if pong_cnt + 1 < prev_ping_cnt {
+            println!("Dropping inactive TLS connection..");
+            let _ = mles_tx_inner.start_send(Vec::new())
+                .map_err(|err| Error::new(ErrorKind::Other, err));
+            let _ = mles_tx_inner.poll_complete()
+                .map_err(|err| Error::new(ErrorKind::Other, err));
+        }
+        let _  = combined_tx_inner.start_send(Message::ping(Vec::new()))
+            .map_err(|err| Error::new(ErrorKind::Other, err));
+        let _ = combined_tx_inner.poll_complete()
+            .map_err(|err| Error::new(ErrorKind::Other, err));
+        Ok(())
+    })
+    .map_err(|e| panic!("delay errored; err={:?}", e));
+
+    let ws_reader = stream.for_each(move |message: Message| {
+        if message.is_pong() {
+            let _ = pong_cntr.fetch_add(1, Ordering::Relaxed);
+        }
+        else {
+            let mles_message = message.into_bytes();
+            let _ = mles_tx
+                .start_send(mles_message)
+                .map_err(|err| Error::new(ErrorKind::Other, err));
+            let _ = mles_tx
+                .poll_complete()
+                .map_err(|err| Error::new(ErrorKind::Other, err));
+        }
+        Ok(())
+    });
+
+    let tcp_to_ws_writer = ws_rx.for_each(move |msg: Vec<_>| {
+        let msg = Message::binary(msg);
+        let _ = combined_tx
+            .start_send(msg)
+            .map_err(|err| Error::new(ErrorKind::Other, err));
+        let _ = combined_tx
+            .poll_complete()
+            .map_err(|err| Error::new(ErrorKind::Other, err));
+        Ok(())
+    });
+
+    let ws_writer = combined_rx.fold(sink, |mut sink, msg| {
+        let _ = sink
+            .start_send(msg)
+            .map_err(|err| Error::new(ErrorKind::Other, err));
+        let _ = sink
+            .poll_complete()
+            .map_err(|err| Error::new(ErrorKind::Other, err));
+        Ok(sink)
+    });
+
+    let connection = ws_reader
+        .map(|_| ())
+        .map_err(|_| ())
+        .select(ws_writer.map(|_| ()).map_err(|_| ()));
+
+    let conn_with_task = connection
+        .map(|_| ())
+        .map_err(|_| ())
+        .select(task.map(|_| ()).map_err(|_| ()));
+
+    let conn_with_task_and_tcp = conn_with_task
+        .map(|_| ())
+        .map_err(|_| ())
+        .select(tcp_to_ws_writer.map(|_| ()).map_err(|_| ()));
+
+    let connection = conn_with_task_and_tcp 
+        .map(|_| ())
+        .map_err(|_| ())
+        .select(client.map(|_| ()).map_err(|_| ()))
+        .then(|_| { println!("Exit of an client"); Ok(()) });
+    connection
 }
