@@ -76,6 +76,7 @@ fn main() {
             // First start the redirecting from port 80 to port 443.
             let domain = domain.clone();
             let redirect = warp::path::tail().map(move |path: warp::path::Tail| {
+                println!("Tail for redirect is {}", path.as_str());
                 warp::redirect::redirect(
                     warp::http::Uri::from_str(&format!(
                             "https://{}/{}",
