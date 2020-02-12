@@ -15,6 +15,7 @@ use std::io::{self};
 use tokio_io::codec::{Encoder as TokioEncoder, Decoder as TokioDecoder};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use std::str::FromStr;
 
@@ -93,6 +94,7 @@ fn main() {
                 tokio::run(server);
             });
         }
+        let uidchannel = Arc::new(Mutex::new(0u32));
 
         let www_root_inner = www_root_dir.clone();
         let (tx, rx) = oneshot::channel();
@@ -101,10 +103,11 @@ fn main() {
             println!("Running TLS service on port 443");
             let index = warp::fs::dir(www_root_inner);
             let ws = warp::ws2().and(warp::header::exact("Sec-WebSocket-Protocol", ACCEPTED_PROTOCOL))
-                .map(|ws: warp::ws::Ws2| {
+                .map(move |ws: warp::ws::Ws2| {
+                    let uidchannel_inner = uidchannel.clone();
                     // And then our closure will be called when it completes...
                     ws.on_upgrade(|websocket| {
-                        run_websocket_proxy(websocket)
+                        run_websocket_proxy(websocket, uidchannel_inner)
                     })
                 }).with(warp::reply::with::header("Sec-WebSocket-Protocol", "mles-websocket"));
 
@@ -324,7 +327,7 @@ fn time_to_expiration<P: AsRef<std::path::Path>>(p: P) -> Option<std::time::Dura
         .time_to_expiration()
 }
 
-fn run_websocket_proxy(websocket: warp::ws::WebSocket) -> impl Future<Item = (), Error = ()> + Send + 'static {
+fn run_websocket_proxy(websocket: warp::ws::WebSocket, uidchannel: Arc<Mutex<u32>>) -> impl Future<Item = (), Error = ()> + Send + 'static {
     let raddr = SRV_ADDR.parse().unwrap();
 
     let keyval = match env::var("MLES_KEY") {
@@ -349,6 +352,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket) -> impl Future<Item = (),
     let (mut mles_tx, mles_rx) = unbounded();
     let (mut combined_tx, combined_rx) = unbounded();
 
+    let uidchannel_inner = uidchannel.clone();
     let tcp = TcpStream::connect(&raddr);
     let client = tcp
         .and_then(move |stream| {
@@ -379,6 +383,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket) -> impl Future<Item = (),
 
             let (tcp_sink, tcp_stream) = Bytes.framed(stream).split();
 
+
             let mles_rx = mles_rx.map_err(|_| panic!()); // errors not possible on rx XXX
             let mles_rx = mles_rx.and_then(move |buf: Vec<_>| {
                 if buf.is_empty() {
@@ -393,6 +398,10 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket) -> impl Future<Item = (),
                     key = Some(MsgHdr::do_hash(&keys));
                     cid = Some(MsgHdr::select_cid(key.unwrap()));
                     cid_val = cid.unwrap();
+                    {
+                        let mut uidchannel_locked = uidchannel_inner.lock().unwrap();
+                        *uidchannel_locked = cid_val;
+                    }
                     println!("Adding TLS client with cid {:x}", cid.unwrap());
                 }
                 let msghdr = MsgHdr::new(buf.len() as u32, cid.unwrap(), key.unwrap());
@@ -474,7 +483,10 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket) -> impl Future<Item = (),
         Ok(())
     });
 
-    let ws_writer = combined_rx.fold(sink, |mut sink, msg| {
+    let uidchannel_inner = uidchannel.clone();
+    let ws_writer = combined_rx.fold(sink, move |mut sink, msg| {
+        let uidchannel_locked = uidchannel_inner.lock().unwrap();
+        println!("Uidchannel {}", *uidchannel_locked);
         let _ = sink
             .start_send(msg)
             .map_err(|err| Error::new(ErrorKind::Other, err));
