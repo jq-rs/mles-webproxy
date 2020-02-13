@@ -448,7 +448,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket) -> impl Future<Item = (),
                 let channel = cipher.encrypt_vec(&channel);
 
                 let mut msg: Vec<u8> = decoded_message.get_message().clone();
-                let mut aesnonce: Vec<u8> = Vec::with_capacity(16);
+                let mut aesnonce: Vec<u8> = Vec::with_capacity(8);
                 aesnonce.copy_from_slice(&msg[0..7]);
                 let iv = aesnonce.clone();
                 aesnonce.extend(iv);
@@ -554,7 +554,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket) -> impl Future<Item = (),
         let channel = cipher.decrypt_vec(&channel).unwrap();
 
         let mut msg: Vec<u8> = decoded_message.get_message().clone();
-        let mut aesnonce: Vec<u8> = Vec::with_capacity(16);
+        let mut aesnonce: Vec<u8> = Vec::with_capacity(8);
         aesnonce.copy_from_slice(&msg[0..7]);
         let iv = aesnonce.clone();
         aesnonce.extend(iv);
