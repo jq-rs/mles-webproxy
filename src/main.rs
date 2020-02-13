@@ -76,7 +76,6 @@ fn main() {
             // First start the redirecting from port 80 to port 443.
             let domain = domain.clone();
             let redirect = warp::path::tail().map(move |path: warp::path::Tail| {
-                println!("Tail for redirect is {}", path.as_str());
                 warp::redirect::redirect(
                     warp::http::Uri::from_str(&format!(
                             "https://{}/{}",
@@ -271,12 +270,11 @@ fn request_cert(domain: &str, email: &str, pem_name: &str, key_name: &str) -> Re
                     )
             });
             let (tx80, rx80) = oneshot::channel();
-            thread::spawn(|| {
-                tokio::run(warp::serve(token.or(redirect))
-                           .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80)
-                           .1);
+            let (_, server) = warp::serve(redirect)
+                .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
+            thread::spawn( || {
+                tokio::run(server);
             });
-
             // After the file is accessible from the web, the calls
             // this to tell the ACME API to start checking the
             // existence of the proof.
