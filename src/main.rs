@@ -270,7 +270,7 @@ fn request_cert(domain: &str, email: &str, pem_name: &str, key_name: &str) -> Re
                     )
             });
             let (tx80, rx80) = oneshot::channel();
-            let (_, server) = warp::serve(redirect)
+            let (_, server) = warp::serve(token.or(redirect))
                 .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
             thread::spawn( || {
                 tokio::run(server);
