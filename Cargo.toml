@@ -1,6 +1,6 @@
 [package]
 name = "arki-server"
-version = "0.4.1"
+version = "0.5.0"
 authors = ["jq-rs"]
 edition = "2018"
 
@@ -13,3 +13,8 @@ tokio-io = "0.1"
 mles-utils = "1.1.0"
 bytes = "0.4"
 x509-parser = "0.6"
+blake2 = "0.8"
+aes-ctr = "0.3"
+aes = "0.3"
+block-modes = "0.3"
+base64 = "0.11"
