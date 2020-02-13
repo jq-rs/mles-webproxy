@@ -449,7 +449,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket) -> impl Future<Item = (),
 
                 let mut msg: Vec<u8> = decoded_message.get_message().clone();
                 let mut aesnonce: Vec<u8> = Vec::with_capacity(8);
-                aesnonce.copy_from_slice(&msg[0..7]);
+                aesnonce.copy_from_slice(&msg[..=7]);
                 let iv = aesnonce.clone();
                 aesnonce.extend(iv);
                 let nonce = GenericArray::from_slice(&aesnonce);
@@ -555,7 +555,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket) -> impl Future<Item = (),
 
         let mut msg: Vec<u8> = decoded_message.get_message().clone();
         let mut aesnonce: Vec<u8> = Vec::with_capacity(8);
-        aesnonce.copy_from_slice(&msg[0..7]);
+        aesnonce.copy_from_slice(&msg[..=7]);
         let iv = aesnonce.clone();
         aesnonce.extend(iv);
         let nonce = GenericArray::from_slice(&aesnonce);
