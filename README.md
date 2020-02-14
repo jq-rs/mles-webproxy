@@ -5,7 +5,7 @@ Arki-server is an Mles WebSocket proxy service for [Mles](https://github.com/jq-
 ## Example how to create your own personal proxy server
 
  1. [Install](https://www.rust-lang.org/tools/install) Rust and Cargo package manager to your preferred server
- 2. Clone arki-server repository: `git clone https://github.com/jq-rs/arki-server.git; cd arki-server; git submodule init --recursive`
+ 2. Clone arki-server repository: `git clone https://github.com/jq-rs/arki-server.git; cd arki-server; git submodule update --init --recursive`
  3. Compile arki-server: `RUSTFLAGS="-C target-feature=+aes,+ssse3" cargo build --release`
  4. Startup arki-server Mles WebSocket proxy in your local server. *Notice: this will try to fetch certificates from Let's Encrypt by default*:  `export MLES_KEY=<secret-key-string-here>; target/release/arki-server <www-root> <email-for-tls> <domain-for-tls>`
      - default ports 80 and 443 need root privileges
