@@ -12,7 +12,7 @@ Arki-server is an Mles WebSocket proxy service for [Mles](https://github.com/jq-
  5. Open port 443 of your firewall for Mles WebSocket protocol, if you plan to connect from outer world
  6. Connect to port 443 of your server with Mles Websocket application
   
- Optional: Before above, you can change the default remote Mles server endpoint by changing line `const SRV_ADDR: &str = "35.157.221.129:8077"; // mles.io` to preferred (this will be a cmd parameter later on).
+ Optional: Before above, you can change the default remote Mles server endpoint by changing line `const SRV_ADDR: &str = "35.157.221.129:8077"; // mles.io` to preferred (this will be a cmd line parameter later on).
  
  Optional: You can configure with provided systemctl scripts the services to be started automatically on server reboot.
  
