@@ -41,7 +41,7 @@ use mles_utils::*;
 
 const KEEPALIVE: u64 = 5;
 const ACCEPTED_PROTOCOL: &str = "mles-websocket";
-const USAGE: &str = "Usage: arkiserver <www-directory> <email> <domain>";
+const USAGE: &str = "Usage: arkiserver <www-directory> <email-for-tls> <domain-for-tls> <mles-srv-addr x.x.x.x:p>";
 const ADAY: Duration = Duration::from_secs(60 * 60 * 24);
 const AMONTH: Duration = Duration::from_secs(60 * 60 * 24 * 30);
 const SRV_ADDR: &str = "35.157.221.129:8077"; // mles.io
@@ -50,10 +50,11 @@ fn main() {
     let mut www_root_dir = "".to_string();
     let mut email = "".to_string();
     let mut domain = "".to_string();
+    let mut srv_addr = "".to_string();
 
     println!("Starting Mles Websocket proxy...");
     for (argcnt, item) in env::args().enumerate() {
-        if argcnt > 3 {
+        if argcnt > 4 {
             println!("{}", USAGE);
             process::exit(1);
         }
@@ -69,7 +70,23 @@ fn main() {
             println!("Domain: {}", item);
             domain = item.clone();
         }
+        if argcnt == 4 {
+            println!("Mles server: {}", item);
+            srv_addr = item.clone();
+        }
     }
+    
+    if 0 == srv_addr.len() {
+        srv_addr = SRV_ADDR.to_string();
+        println!("Mles server: {} (mles.io:8077)", srv_addr);
+    }
+    else {
+      if let Err(_) = srv_addr.parse::<SocketAddr>() {
+           println!("{}", USAGE);
+           process::exit(1);
+      }
+    }
+
     if www_root_dir.len() == 0 ||
        email.len() == 0 ||
        domain.len() == 0 {
@@ -110,16 +127,18 @@ fn main() {
             });
         }
         let www_root_inner = www_root_dir.clone();
+        let srv_addr_inner = srv_addr.clone();
         let (tx, rx) = oneshot::channel();
         {
             /* Run port 443 service */
             println!("Running TLS service on port 443");
             let index = warp::fs::dir(www_root_inner);
             let ws = warp::ws2().and(warp::header::exact("Sec-WebSocket-Protocol", ACCEPTED_PROTOCOL))
-                .map(|ws: warp::ws::Ws2| {
+                .map(move |ws: warp::ws::Ws2| {
+                    let srv_addr = srv_addr_inner.clone();
                     // And then our closure will be called when it completes...
-                    ws.on_upgrade(|websocket| {
-                        run_websocket_proxy(websocket)
+                    ws.on_upgrade(move |websocket| {
+                        run_websocket_proxy(websocket, &srv_addr)
                     })
                 }).with(warp::reply::with::header("Sec-WebSocket-Protocol", "mles-websocket"));
 
@@ -340,8 +359,8 @@ fn time_to_expiration<P: AsRef<std::path::Path>>(p: P) -> Option<std::time::Dura
 
 
 
-fn run_websocket_proxy(websocket: warp::ws::WebSocket) -> impl Future<Item = (), Error = ()> + Send + 'static {
-    let raddr = SRV_ADDR.parse().unwrap();
+fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl Future<Item = (), Error = ()> + Send + 'static {
+    let raddr = srv_addr.parse::<SocketAddr>().unwrap(); //already checked
 
     let keyval = match env::var("MLES_KEY") {
         Ok(val) => val,
