@@ -665,6 +665,6 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket) -> impl Future<Item = (),
         .map(|_| ())
         .map_err(|_| ())
         .select(client.map(|_| ()).map_err(|_| ()))
-        .then(|_| { println!("Exit of an client"); Ok(()) });
+        .then(|_| Ok(()));
     connection
 }
