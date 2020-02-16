@@ -22,10 +22,9 @@ use std::str::FromStr;
 use blake2::{Blake2s, Digest};
 use aes::block_cipher_trait::generic_array::GenericArray;
 use block_modes::{BlockMode, Ecb};
-use block_modes::block_padding::ZeroPadding;
+use block_modes::block_padding::Pkcs7;
 use aes::Aes128;
-/* We do not need padding by default */
-type Aes128Ecb = Ecb<Aes128, ZeroPadding>;
+type Aes128Ecb = Ecb<Aes128, Pkcs7>;
 
 use base64::{encode as b64encode, decode as b64decode};
 
@@ -503,9 +502,13 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                 }
 
                 let mut msg: Vec<u8> = msg.clone();
+                let mut hasher = Blake2s::new();
+                hasher.input(&msg[0..8]);
+                let mut vec: Vec<u8> = hasher.result().as_slice().to_vec();
+                vec.truncate(8);
                 let mut aesnonce = Vec::with_capacity(16);
                 aesnonce.extend_from_slice(&msg[0..8]);
-                aesnonce.extend_from_slice(&msg[0..8]);
+                aesnonce.extend_from_slice(&vec);
                 let nonce = GenericArray::from_slice(&aesnonce);
 
                 // create cipher instance
@@ -632,9 +635,13 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
         }
 
         let mut msg: Vec<u8> = msg.clone();
+        let mut hasher = Blake2s::new();
+        hasher.input(&msg[0..8]);
+        let mut vec: Vec<u8> = hasher.result().as_slice().to_vec();
+        vec.truncate(8);
         let mut aesnonce = Vec::with_capacity(16);
         aesnonce.extend_from_slice(&msg[0..8]);
-        aesnonce.extend_from_slice(&msg[0..8]);
+        aesnonce.extend_from_slice(&vec);
         let nonce = GenericArray::from_slice(&aesnonce);
 
         // create cipher instance
