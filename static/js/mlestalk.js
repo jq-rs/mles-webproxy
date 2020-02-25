@@ -28,6 +28,10 @@ const RETIMEOUT = 1500; /* ms */
 const MAXTIMEOUT = 1000*60*5; /* ms */
 const MAXQLEN = 32;
 const RESYNC_TIMEOUT = 15000; /* ms */
+const LED_ON_TIME = 500; /* ms */
+const LED_OFF_TIME = 2500; /* ms */
+const SCROLL_TIME = 500; /* ms */
+const ASYNC_SLEEP = 3 /* ms */
 var reconn_timeout = RETIMEOUT;
 var reconn_attempts = 0;
 
@@ -35,6 +39,7 @@ var isTokenChannel = false;
 var sipkey;
 var sipKeyIsOk = false;
 var isResync = false;
+var lastWrittenMsg = "";
 
 var lastMessageSeenTs = 0;
 var lastReconnectTs = 0;
@@ -50,6 +55,7 @@ weekday[5] = "Fri";
 weekday[6] = "Sat";
 var bgTitle = "MlesTalk in the background";
 var bgText = "Notifications active";
+var imagestr = "<an image>";
 
 class Queue {
 	
@@ -93,17 +99,19 @@ function hash_message(uid, data) {
 
 function queue_find_and_match(uid, data) {
 	var lastSeen = -1;
+	var hash = hash_message(uid, data);
 	for(var i=0; i<q.getLength(); i++) {
-		var hash = hash_message(uid, data);
 		var obj = q.get(i);
 		if(obj[1] == hash) {
 			lastSeen = i+1;
+			break;
 		}
 	}
 	if(lastSeen != -1) {
 		q.flush(lastSeen);
 	}
 }
+
 function queue_sweep_and_send(uid) {
 	for(var i=0; i < q.getLength(); i++) {
 		var obj = q.get(i);
@@ -183,7 +191,9 @@ var webWorker = new Worker('js/mlestalk-webworker/js/webworker.js');
 function onPause() {
 	will_notify = true;
 	if(isCordova) {
-		cordova.plugins.backgroundMode.enable();
+		if(!cordova.plugins.backgroundMode.isActive()) {
+			cordova.plugins.backgroundMode.enable();
+		}
 		cordova.plugins.backgroundMode.toBackground();
 		cordova.plugins.notification.badge.clear();
 		cordova.plugins.notification.local.clearAll();
@@ -196,35 +206,17 @@ function onResume() {
 		cordova.plugins.notification.local.clearAll();
 		cordova.plugins.notification.badge.clear();
 		cordova.plugins.backgroundMode.fromBackground();
-		cordova.plugins.backgroundMode.disable();
 	}
 }
+
+function onBackKeyDown() {
+  //do nothing
+}
+
 
 var interval;
 function onLoad() {
 	document.addEventListener("deviceready", function () {
-		// Background-fetch handler with JobScheduler.
-        var BackgroundFetch = window.BackgroundFetch;
-
-        // Your background-fetch handler.
-        var fetchCallback = function() {
-			if('' != myname && '' != mychannel) {
-				sync_reconnect(myname, mychannel);
-			}
-            // Required: Signal completion of your task to native code
-			// If you fail to do this, the OS can terminate your app
-            // or assign battery-blame for consuming too much background-time
-			BackgroundFetch.finish();
-        };
-
-        var failureCallback = function(error) {
-            console.log('Background fetch failed', error);
-        };
-
-        BackgroundFetch.configure(fetchCallback, failureCallback, {
-            minimumFetchInterval: 15
-        });
-
 		cordova.plugins.notification.local.requestPermission(function (granted) {
 			can_notify = granted;
 		}); 
@@ -234,11 +226,19 @@ function onLoad() {
 			text: bgText
 		});
 		
+		cordova.plugins.notification.local.setDefaults({
+			led: { color: '#77407B', on: LED_ON_TIME, off: LED_OFF_TIME },
+			vibrate: true
+		});
+
 		// sets an recurring alarm that keeps things rolling
 		cordova.plugins.backgroundMode.disableWebViewOptimizations();
+		cordova.plugins.backgroundMode.enable();
 
 		document.addEventListener("pause", onPause, false);
 		document.addEventListener("resume", onResume, false);
+		document.addEventListener("backbutton", onBackKeyDown, false);
+
 		isCordova = true;
 	}, false);
 	
@@ -258,11 +258,11 @@ $(document).ready(function() {
 
 function ask_channel() {
 	if ($('#input_name').val().trim().length <= 0 ||
-		mytoken == null ||
+		(mytoken == null && $('#input_channel').val().trim().length <= 0) ||
 		$('#input_key').val().trim().length <= 0 ) {
 
 		//not enough input, alert
-		pop_alert(mytoken);
+		pop_alert();
 
 	} else {
 		if(!initOk) {
@@ -336,7 +336,13 @@ function sendEmptyJoin() {
 
 function send(isFull) {
 	var message = $('#input_message').val();
-	send_message(myname, mychannel, message, isFull);
+	//if(file) {
+	//	send_image(myname, mychannel, file);
+	//	document.getElementById("input_file").value = "";
+	//}
+	//else {
+		send_message(myname, mychannel, message, isFull);
+	//}
 }
 
 function chan_exit() {
@@ -458,6 +464,40 @@ webWorker.onmessage = function(e) {
 
 			initReconnect();
 
+			//update hash
+			var duid = uid.split(' ').join('_');
+			if(idhash[duid] == null) {	
+				idhash[duid] = 0;
+				idappend[duid] = false;
+				idtimestamp[uid] = msgTimestamp;
+				idnotifyts[uid] = 0;
+				idlastmsghash[uid] = 0;
+				idreconnsync[uid] = false;
+			}
+
+			var dateString = "[" + stamptime(new Date(msgTimestamp)) + "] ";
+
+			//begin presence time per user (now)
+
+			if(uid == myname) {
+				if(!isResync) {
+					console.log("Resyncing");
+					isResync = true;
+					resync(myname);
+				}
+				if(isFull && message.length > 0)
+					queue_find_and_match(uid, message);			
+			}
+			else if(ownid > 0 && message.length >= 0 && lastWrittenMsg.length > 0) {
+				var end = "</li></div>";
+				//console.log("Got presence update from " + uid);
+				lastWrittenMsg = lastWrittenMsg.substring(0, lastWrittenMsg.length-end.length);
+				lastWrittenMsg += " &#x2713;" + end;
+				$('#owner' + (ownid-1)).replaceWith(lastWrittenMsg);
+				lastWrittenMsg = "";
+				//update presence if current time per user is larger than begin presence
+			}
+			
 			if(isMultipart) {
 				if(!multipart_dict[uid + channel]) {
 					if(!isFirst) {
@@ -474,30 +514,6 @@ webWorker.onmessage = function(e) {
 				multipart_dict[uid + channel] = null;
 			}
 
-			//update hash
-			var duid = uid.split(' ').join('_');
-			if(idhash[duid] == null) {	
-				idhash[duid] = 0;
-				idappend[duid] = false;
-				idtimestamp[uid] = msgTimestamp;
-				idnotifyts[uid] = 0;
-				idlastmsghash[uid] = 0;
-				idreconnsync[uid] = false;
-			}			
-
-			var dateString = "[" + stamptime(new Date(msgTimestamp)) + "] ";
-			var now = timenow();
-
-			if(uid == myname) {
-				if(!isResync) {
-					console.log("Resyncing");
-					isResync = true;
-					resync(myname);
-				}
-				if(isFull && message.length > 0)
-					queue_find_and_match(uid, message);			
-			}
-			
 			if(message.length > 0 && idtimestamp[uid] <= msgTimestamp) {
 				if(!idreconnsync[uid]) {
 					idlastmsghash[uid] = hash_message(uid, isFull ? msgTimestamp + message + '\n' : msgTimestamp + message);
@@ -522,12 +538,15 @@ webWorker.onmessage = function(e) {
 				if(isImage) {
 					if (uid != myname) {
 						li = '<div id="' + duid + '' + idhash[duid] + '"><li class="new"><span class="name">' + uid + '</span> ' + dateString 
-							+ '<img class="image" src="' + message + '" height="100px" data-action="zoom" alt=""></li></div>'
-					}
+							+ '<img class="image" src="' + message + '" height="100px" data-action="zoom" alt="">';
+
+						}
 					else {
 						li = '<div id="' + duid + '' + idhash[duid] + '"><li class="own"> ' + dateString
-							+ '<img class="image" src="' + message + '" height="100px" data-action="zoom" alt=""></li></div>'
+							+ '<img class="image" src="' + message + '" height="100px" data-action="zoom" alt="">';
+
 					}
+					li += '</li></div>';
 				}
 				else {
 					if (uid != myname) {
@@ -551,7 +570,7 @@ webWorker.onmessage = function(e) {
 						cordova.plugins.notification.badge.increase();
 					}
 				}
-				else if(true == idappend[duid]){		
+				else if(true == idappend[duid]) {
 					$('#' + duid + '' + idhash[duid]).replaceWith(li);
 				}
 
@@ -563,7 +582,7 @@ webWorker.onmessage = function(e) {
 					if(will_notify && can_notify)
 					{
 						if(true == isImage) {
-							message = "<an image>";
+							message = imagestr;
 						}
 						do_notify(uid, channel, msgTimestamp, message);
 					}
@@ -614,8 +633,8 @@ function do_notify(uid, channel, msgTimestamp, message) {
 		cordova.plugins.notification.local.schedule({
 			title: msg[1],
 			text: msg[2],
-			icon: 'file://img/micon.png',
-			smallIcon: 'res://micon.png',
+			icon: 'res://large_micon.png',
+			smallIcon: 'res://icon.png',
 			foreground: false,
 			trigger: { in: 1, unit: 'second' }
 		});
@@ -624,6 +643,14 @@ function do_notify(uid, channel, msgTimestamp, message) {
 
 function sleep(ms) {
 	return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function scrollToBottomWithTimer() {
+	await sleep(SCROLL_TIME);
+	scrollToBottom();
+	/* Scroll twice if me miss the first one in UI */
+	await sleep(SCROLL_TIME);
+	scrollToBottom();
 }
 
 async function resync(uid) {
@@ -647,11 +674,14 @@ async function reconnect(uid, channel) {
 	webWorker.postMessage(["reconnect", null, uid, channel, isTokenChannel]);
 }
 
-function sync_reconnect(uid, channel) {
+function sync_reconnect() {
 	if(isReconnect)
 		return;
 	
-	webWorker.postMessage(["reconnect", null, uid, channel, isTokenChannel]);
+	if('' != myname && '' != mychannel) {
+		webWorker.postMessage(["reconnect", null, myname, mychannel, isTokenChannel]);
+		sendEmptyJoin();
+	}
 }
 
 function scrollToBottom() {
@@ -661,7 +691,7 @@ function scrollToBottom() {
 function send_data(cmd, uid, channel, data, isFull, isImage, isMultipart, isFirst, isLast) {
 
 	if(initOk) {
-		var rarray = new Uint32Array(6);
+		var rarray = new Uint32Array(8);
 		window.crypto.getRandomValues(rarray);
 		var arr = [cmd, data, uid, channel, isTokenChannel, rarray, isFull, isImage, isMultipart, isFirst, isLast];
 		if(!isResync || data.length == 0) {
@@ -679,35 +709,36 @@ function update_after_send(message, isFull, isImage) {
 
 	var dateString = "[" + timenow() + "] ";
 	dateString = update_datestring(dateString);
+	var li;
 
 	if(!isImage) {
-		var li = '<div id="owner' + ownid + '"><li class="own"> ' + dateString + "" + autolinker.link( message ) + '</li></div>';
-		if(isFull) {
-			ownid = ownid + 1;
-			ownappend = false;
-		}
-		else {
-			if(false == ownappend) {
-				$('#messages').append(li);
-				ownappend = true;
-			}
-			else
-				$('#owner' + ownid).replaceWith(li);
-		}
-
-		scrollToBottom();
-
-		if(isFull)
-			$('#input_message').val('');
+		li = '<div id="owner' + ownid + '"><li class="own"> ' + dateString + "" + autolinker.link( message ) + '</li></div>';
 	}
 	else {
-		var li = '<div id="owner' + ownid + '"><li class="own"> ' + dateString
-		+ '<img class="image" src="' + message + '" height="100px" data-action="zoom" alt=""></li></div>'
-		$('#messages').append(li);
-		ownid = ownid + 1;
-		scrollToBottom();
-		$('#input_file').val('');
+		li = '<div id="owner' + ownid + '"><li class="own"> ' + dateString
+			 + '<img class="image" src="' + message + '" height="100px" data-action="zoom" alt=""></li></div>';
 	}
+
+	if(isFull) {
+		if(isImage) {
+			$('#messages').append(li);
+		}
+		lastWrittenMsg = li;
+		ownid = ownid + 1;
+		ownappend = false;
+	}
+	else {
+		lastWrittenMsg = "";
+		if(false == ownappend) {
+			$('#messages').append(li);
+			ownappend = true;
+		}
+		else
+			$('#owner' + ownid).replaceWith(li);
+	}
+	scrollToBottom();
+	if(isFull)
+		$('#input_message').val('');
 }
 
 function send_message(uid, channel, message, isFull) {
@@ -723,7 +754,7 @@ function send_message(uid, channel, message, isFull) {
 
 const MULTIPART_SLICE = 1024*8;
 async function send_dataurl(dataUrl, uid, channel) {
-	var isImage = true;
+	const isImage = true;
 	const isFull = true;
 	
 	if(dataUrl.length > MULTIPART_SLICE) {
@@ -748,7 +779,7 @@ async function send_dataurl(dataUrl, uid, channel) {
 			var data = dataUrl.slice(i, i + MULTIPART_SLICE);
 			send_data("send", myname, mychannel, data, isFull, isImage, isMultipart, isFirst, isLast);
 			while(false == multipartContinue) {
-				await sleep(10);
+				await sleep(ASYNC_SLEEP);
 			}
 			multipartContinue = false;
 		}
@@ -757,7 +788,7 @@ async function send_dataurl(dataUrl, uid, channel) {
 		send_data("send", myname, mychannel, data, isFull, isImage, false, false, false); /* is not multipart */
 	}
 	
-	update_after_send(dataUrl, isFull, true);
+	update_after_send(dataUrl, isFull, isImage);
 }
 
 
@@ -804,7 +835,7 @@ function send_image(myname, mychannel, file) {
 }
 
 function get_token() {
-	return "https://" + addrportinput + "/web?token=" + token;
+	return "https://" + addrportinput + "/mles-websocket-token.html?token=" + token;
 }
 
 function get_front() {
@@ -839,8 +870,8 @@ function set_language() {
 	
 	switch(language) {
 		case "fi":
-			$("#token_title").text("MlesTalk kutsu!");
 			$("#channel_user_name").text("Nimesi?");
+			$("#channel_name").text("Kanava?");
 			$("#channel_key").text("Jaettu avain?");
 			$("#channel_server").text("Mles WebSocket palvelimen osoite");
 			$("#channel_exit").val("poistu");
@@ -855,10 +886,11 @@ function set_language() {
 			weekday[6] = "la";
 			bgTitle = "MlesTalk taustalla";
 			bgText = "Ilmoitukset aktiivisena";
+			imagestr = "<kuva>";
 			break;
 		case "se":
-			$("#token_title").text("MlesTalk inbjudan!");
 			$("#channel_user_name").text("Ditt namn?");
+			$("#channel_name").text("Kanal?");
 			$("#channel_key").text("Delad nyckel?");
 			$("#channel_server").text("Mles WebSocket server adress");
 			$("#channel_exit").val("utgång");
@@ -873,10 +905,11 @@ function set_language() {
 			weekday[6] = "lö";
 			bgTitle = "MlesTalk i bakgrunden";
 			bgText = "Meddelanden aktiva";
+			imagestr = "<en bild>";
 			break;
 		case "es":
-			$("#token_title").text("Invitación MlesTalk!");
 			$("#channel_user_name").text("Su nombre?");
+			$("#channel_name").text("Canal?");
 			$("#channel_key").text("Llave compartida?");
 			$("#channel_server").text("Mles WebSocket dirección del servidor");
 			$("#channel_exit").val("salida");
@@ -891,10 +924,11 @@ function set_language() {
 			weekday[6] = "S";
 			bgTitle = "MlesTalk en el fondo";
 			bgText = "Notificaciones activas";
+			imagestr = "<una imagen>";
 			break;
 		case "de":
-			$("#token_title").text("MlesTalk Einladung!");
 			$("#channel_user_name").text("Dein name?");
+			$("#channel_name").text("Kanal?");
 			$("#channel_key").text("Gemeinsamer Schlüssel?");
 			$("#channel_server").text("Mles WebSocket Serveradresse");
 			$("#channel_exit").val("abgehen");
@@ -909,10 +943,11 @@ function set_language() {
 			weekday[6] = "Sa";
 			bgTitle = "MlesTalk im Hintergrund";
 			bgText = "Benachrichtigungen aktiv";
+			imagestr = "<ein Bild>";
 			break;
 		case "fr":
-			$("#token_title").text("Invitation MlesTalk!");
 			$("#channel_user_name").text("Votre nom?");
+			$("#channel_name").text("Canal?");
 			$("#channel_key").text("Clé partagée?");
 			$("#channel_server").text("Mles WebSocket adresse du serveur");
 			$("#channel_exit").val("sortie");
@@ -927,11 +962,12 @@ function set_language() {
 			weekday[6] = "sam";
 			bgTitle = "MlesTalk en arrière-plan";
 			bgText = "Notifications actives";
+			imagestr = "<une image>";
 			break;
 		case "gb":
 		default:
-			$("#token_title").text("MlesTalk invitation!");
 			$("#channel_user_name").text("Your name?");
+			$("#channel_name").text("Channel?");
 			$("#channel_key").text("Shared key?");
 			$("#channel_server").text("Mles WebSocket server address");
 			$("#channel_exit").val("exit");
@@ -946,6 +982,7 @@ function set_language() {
 			weekday[6] = "Sat";
 			bgTitle = "MlesTalk in the background";
 			bgText = "Notifications active";
+			imagestr = "<an image>";
 			break;
 	}
 
@@ -957,51 +994,27 @@ function set_language() {
 	}
 }
 
-function pop_alert(mytoken) {
+function pop_alert() {
 	var language = $("#channel_localization").val();
-	if(mytoken == null) {
-		switch(language) {
-			case "fi":
-				alert('Kutsun tunnus puuttuu!');
-				return;
-			case "se":
-				alert('Saknad inbjudnings-id!');
-				return;
-			case "es":
-				alert('Falta la identificación de la invitación!');
-				return;
-			case "de":
-				alert('Fehlende Einladungs-ID!');
-				return;
-			case "fr":
-				alert("Identifiant d'invitation manquant!");
-				return;
-			case "gb":
-			default:
-				alert('Missing invitation id!');
-				return;
-		}
-	}
-
 	switch(language) {
 		case "fi":
-			alert('Nimi ja jaettu avain?');
+			alert('Nimi, kanava ja jaettu avain?');
 			break;
 		case "se":
-			alert('Namn och delad nyckel?');
+			alert('Namn, kanal och delad nyckel?');
 			break;
 		case "es":
-			alert('Nombre y clave compartida?');
+			alert('Nombre, canal y clave compartida?');
 			break;
-		case "de":yy
-			alert('Name und gemeinsamer Schlüssel?');
+		case "de":
+			alert('Name, Kanal und gemeinsamer Schlüssel?');
 			break;
 		case "fr":
-			alert('Nom et clé partagée?');
+			alert('Nom, canal et clé partagée?');
 			break;
 		case "gb":
 		default:
-			alert('Name and shared key?');
+			alert('Name, channel and shared key?');
 			break;
 	}
 }
