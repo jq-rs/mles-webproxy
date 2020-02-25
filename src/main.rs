@@ -502,19 +502,14 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                 }
 
                 let mut msg: Vec<u8> = msg.clone();
-                let mut hasher = Blake2s::new();
-                hasher.input(&msg[0..8]);
-                let mut vec: Vec<u8> = hasher.result().as_slice().to_vec();
-                vec.truncate(8);
                 let mut aesnonce = Vec::with_capacity(16);
-                aesnonce.extend_from_slice(&msg[0..8]);
-                aesnonce.extend_from_slice(&vec);
+                aesnonce.extend_from_slice(&msg[0..16]);
                 let nonce = GenericArray::from_slice(&aesnonce);
 
                 // create cipher instance
                 let mut cipher = Aes128Ctr::new(&aeskey, &nonce);
                 // apply keystream (encrypt)
-                cipher.apply_keystream(&mut msg[8..]);
+                cipher.apply_keystream(&mut msg[16..]);
 
                 let ciphered_message = Msg::new(b64encode(&cuid), b64encode(&cchannel), msg);
                 let cbuf = ciphered_message.encode();
@@ -635,19 +630,14 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
         }
 
         let mut msg: Vec<u8> = msg.clone();
-        let mut hasher = Blake2s::new();
-        hasher.input(&msg[0..8]);
-        let mut vec: Vec<u8> = hasher.result().as_slice().to_vec();
-        vec.truncate(8);
         let mut aesnonce = Vec::with_capacity(16);
-        aesnonce.extend_from_slice(&msg[0..8]);
-        aesnonce.extend_from_slice(&vec);
+        aesnonce.extend_from_slice(&msg[0..16]);
         let nonce = GenericArray::from_slice(&aesnonce);
 
         // create cipher instance
         let mut cipher = Aes128Ctr::new(&aeskey, &nonce);
         // apply keystream (decrypt)
-        cipher.apply_keystream(&mut msg[8..]);
+        cipher.apply_keystream(&mut msg[16..]);
 
         let deciphered_message = Msg::new(b64encode(&duid), b64encode(&dchannel), msg);
         let dbuf = deciphered_message.encode();
