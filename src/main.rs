@@ -45,6 +45,8 @@ const ADAY: Duration = Duration::from_secs(60 * 60 * 24);
 const AMONTH: Duration = Duration::from_secs(60 * 60 * 24 * 30);
 const SRV_ADDR: &str = "35.157.221.129:8077"; // mles.io
 
+const AES_NONCELEN: usize = 16;
+
 fn main() {
     let mut www_root_dir = "".to_string();
     let mut email = "".to_string();
@@ -425,14 +427,13 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                     //println!("Empty buffer!");
                     return Err(Error::new(ErrorKind::BrokenPipe, "broken pipe"));
                 }
-                let decoded_message = Msg::decode(buf.as_slice());
+                let mut decoded_message = Msg::decode(buf.as_slice());
 
                 /* Check sanity */
                 let channel = decoded_message.get_channel();
                 let uid = decoded_message.get_uid();
-                let msg = decoded_message.get_message();
 
-                if 0 == channel.len() || 0 == uid.len() || msg.len() <= 8 {
+                if 0 == channel.len() || 0 == uid.len() || decoded_message.get_message_len() <= AES_NONCELEN {
                     return Err(Error::new(ErrorKind::BrokenPipe, "broken pipe"));
                 }
 
@@ -446,7 +447,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                         let mut hasher = Blake2s::new();
                         hasher.input(channel.clone());
                         let mut vec: Vec<u8> = hasher.result().as_slice().to_vec();
-                        vec.truncate(16);
+                        vec.truncate(AES_NONCELEN);
                         *aeschannel_locked = vec;
 
                         let mut hasher_ecb = Blake2s::new();
@@ -454,7 +455,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                         let mut hasher_ecb_final = Blake2s::new();
                         hasher_ecb_final.input(hasher_ecb.result().as_slice());
                         let mut vec: Vec<u8> = hasher_ecb_final.result().as_slice().to_vec();
-                        vec.truncate(16);
+                        vec.truncate(AES_NONCELEN);
                         *aesecb_locked = vec;
 
                         if let Ok(uid) = b64decode(&uid) {
@@ -501,18 +502,20 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                     return Err(Error::new(ErrorKind::BrokenPipe, "broken pipe"));
                 }
 
-                let mut msg: Vec<u8> = msg.clone();
-                let mut aesnonce = Vec::with_capacity(16);
-                aesnonce.extend_from_slice(&msg[0..16]);
+                decoded_message = decoded_message.set_uid(b64encode(&cuid));
+                decoded_message = decoded_message.set_channel(b64encode(&cchannel));
+
+                let msg: &mut Vec<u8> = decoded_message.get_mut_message();
+                let mut aesnonce = Vec::with_capacity(AES_NONCELEN);
+                aesnonce.extend_from_slice(&msg[0..AES_NONCELEN]);
                 let nonce = GenericArray::from_slice(&aesnonce);
 
                 // create cipher instance
                 let mut cipher = Aes128Ctr::new(&aeskey, &nonce);
                 // apply keystream (encrypt)
-                cipher.apply_keystream(&mut msg[16..]);
+                cipher.apply_keystream(&mut msg[AES_NONCELEN..]);
 
-                let ciphered_message = Msg::new(b64encode(&cuid), b64encode(&cchannel), msg);
-                let cbuf = ciphered_message.encode();
+                let cbuf = decoded_message.encode();
 
                 let msghdr = MsgHdr::new(cbuf.len() as u32, cid.unwrap(), key.unwrap());
                 let mut msgv = msghdr.encode();
@@ -585,14 +588,13 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
     let aeschannel_inner = aeschannel.clone();
     let aesecb_inner = aesecb.clone();
     let tcp_to_ws_writer = ws_rx.for_each(move |buf: Vec<_>| {
-        let decoded_message = Msg::decode(&buf);
+        let mut decoded_message = Msg::decode(&buf);
 
         /* Check sanity */
         let channel = decoded_message.get_channel();
         let uid = decoded_message.get_uid();
-        let msg = decoded_message.get_message();
 
-        if 0 == channel.len() || 0 == uid.len() || msg.len() <= 8 {
+        if 0 == channel.len() || 0 == uid.len() || decoded_message.get_message_len() <= AES_NONCELEN {
             /* Just drop handling */
             return Ok(());
         }
@@ -629,18 +631,20 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
             return Ok(());
         }
 
-        let mut msg: Vec<u8> = msg.clone();
-        let mut aesnonce = Vec::with_capacity(16);
-        aesnonce.extend_from_slice(&msg[0..16]);
+        decoded_message = decoded_message.set_uid(b64encode(&duid));
+        decoded_message = decoded_message.set_channel(b64encode(&dchannel));
+
+        let msg: &mut Vec<u8> = decoded_message.get_mut_message();
+        let mut aesnonce = Vec::with_capacity(AES_NONCELEN);
+        aesnonce.extend_from_slice(&msg[0..AES_NONCELEN]);
         let nonce = GenericArray::from_slice(&aesnonce);
 
         // create cipher instance
         let mut cipher = Aes128Ctr::new(&aeskey, &nonce);
-        // apply keystream (decrypt)
-        cipher.apply_keystream(&mut msg[16..]);
+        // apply keystream (encrypt)
+        cipher.apply_keystream(&mut msg[AES_NONCELEN..]);
 
-        let deciphered_message = Msg::new(b64encode(&duid), b64encode(&dchannel), msg);
-        let dbuf = deciphered_message.encode();
+        let dbuf = decoded_message.encode();
 
         let msg = Message::binary(dbuf);
         let _ = combined_tx
