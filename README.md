@@ -10,7 +10,7 @@ Arki-server is an Mles WebSocket proxy service for [Mles](https://github.com/jq-
  4. Open port 80 and 443 of your firewall for Mles WebSocket protocol and for Let's Encrypt certificates
  5. Startup arki-server Mles WebSocket proxy in your local server. *Notice: this will try to fetch certificates from Let's Encrypt by default*:  `export MLES_KEY=<secret-key-string-here>; target/release/arki-server <www-root> <email-for-tls> <domain-for-tls> <mles-srv-addr x.x.x.x:p>`
      - default ports 80 and 443 need root privileges
- 6. Connect to port 443 of your server with Mles Websocket application
+ 6. Connect to port 443 of your server with Mles WebSocket application
   
  Optional: You can configure with provided systemctl scripts the services to be started automatically on server reboot.
  
