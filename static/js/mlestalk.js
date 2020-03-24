@@ -334,8 +334,14 @@ function sendEmptyJoin() {
 	send_message(myname, mychannel, "", false);
 }
 
+function sendInitJoin() {
+	send_message(myname, mychannel, "", true);
+}
+
 function send(isFull) {
 	var message = $('#input_message').val();
+	//var file = document.getElementById("input_file").files[0];
+
 	//if(file) {
 	//	send_image(myname, mychannel, file);
 	//	document.getElementById("input_file").value = "";
@@ -415,7 +421,7 @@ webWorker.onmessage = function(e) {
 
 			if(uid.length > 0 && channel.length > 0) {
 				initOk = true;
-				sendEmptyJoin();
+				sendInitJoin();
 
 				var li;
 				if(isReconnect && lastMessageSeenTs > 0) {
@@ -514,7 +520,10 @@ webWorker.onmessage = function(e) {
 				multipart_dict[uid + channel] = null;
 			}
 
-			if(message.length > 0 && idtimestamp[uid] <= msgTimestamp) {
+			if(idtimestamp[uid] <= msgTimestamp) {
+				if(isFull && 0 == message.length) /* Ignore init messages in timestamp processing */
+					break;
+				
 				if(!idreconnsync[uid]) {
 					idlastmsghash[uid] = hash_message(uid, isFull ? msgTimestamp + message + '\n' : msgTimestamp + message);
 				}
@@ -529,6 +538,9 @@ webWorker.onmessage = function(e) {
 				idtimestamp[uid] = msgTimestamp;
 				if(lastMessageSeenTs < msgTimestamp)
 					lastMessageSeenTs = msgTimestamp;
+
+				if(0 == message.length)
+					break;
 
 				var li;
 
@@ -680,7 +692,7 @@ function sync_reconnect() {
 	
 	if('' != myname && '' != mychannel) {
 		webWorker.postMessage(["reconnect", null, myname, mychannel, isTokenChannel]);
-		sendEmptyJoin();
+		sendInitJoin();
 	}
 }
 
@@ -693,7 +705,7 @@ function send_data(cmd, uid, channel, data, isFull, isImage, isMultipart, isFirs
 	if(initOk) {
 		var rarray = new Uint32Array(8);
 		window.crypto.getRandomValues(rarray);
-		var arr = [cmd, data, uid, channel, isTokenChannel, rarray, isFull, isImage, isMultipart, isFirst, isLast];
+		var arr = [cmd, data, uid, channel, isTokenChannel, rarray, isFull, isImage, isMultipart, isFirst, isLast, Date.now()];
 		if(!isResync || data.length == 0) {
 			if(data.length > 0) {
 				idlastmsghash[uid] = hash_message(uid, data);
