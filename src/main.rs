@@ -110,16 +110,13 @@ fn main() {
         {
             // First start the redirecting from port 80 to port 443.
             let domain = domain.clone();
-            let redirect = warp::path::tail().map(move |path: warp::path::Tail| {
-                warp::redirect::redirect(
-                    warp::http::Uri::from_str(&format!(
-                            "https://{}/{}",
-                            &domain,
-                            path.as_str()
-                            ))
-                    .expect("problem with uri?"),
-                    )
-            });
+            let redirect = 
+                warp::any().map(move || {
+                    warp::redirect(warp::http::Uri::from_str(&format!(
+                            "https://{}",
+                            &domain
+                            )).expect("problem with uri?"))
+                });
 
             let (_, server) = warp::serve(redirect)
                 .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
@@ -430,7 +427,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                 let mut decoded_message = Msg::decode(buf.as_slice());
 
                 /* Check sanity */
-                let channel = decoded_message.get_channel();
+                let channel  = decoded_message.get_channel();
                 let uid = decoded_message.get_uid();
 
                 if 0 == channel.len() || 0 == uid.len() || decoded_message.get_message_len() <= AES_NONCELEN {
@@ -443,64 +440,42 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                     let mut aeschannel_locked = aeschannel_inner.lock().unwrap();
                     let mut aesecb_locked = aesecb_inner.lock().unwrap();
 
-                    if let Ok(channel) = b64decode(&channel) {
-                        let mut hasher = Blake2s::new();
-                        hasher.input(channel.clone());
-                        let mut vec: Vec<u8> = hasher.result().as_slice().to_vec();
-                        vec.truncate(AES_NONCELEN);
-                        *aeschannel_locked = vec;
+                    let mut hasher = Blake2s::new();
+                    hasher.input(channel.clone());
+                    let mut vec: Vec<u8> = hasher.result().as_slice().to_vec();
+                    vec.truncate(AES_NONCELEN);
+                    *aeschannel_locked = vec;
 
-                        let mut hasher_ecb = Blake2s::new();
-                        hasher_ecb.input(channel.clone());
-                        let mut hasher_ecb_final = Blake2s::new();
-                        hasher_ecb_final.input(hasher_ecb.result().as_slice());
-                        let mut vec: Vec<u8> = hasher_ecb_final.result().as_slice().to_vec();
-                        vec.truncate(AES_NONCELEN);
-                        *aesecb_locked = vec;
+                    let mut hasher_ecb = Blake2s::new();
+                    hasher_ecb.input(channel.clone());
+                    let mut hasher_ecb_final = Blake2s::new();
+                    hasher_ecb_final.input(hasher_ecb.result().as_slice());
+                    let mut vec: Vec<u8> = hasher_ecb_final.result().as_slice().to_vec();
+                    vec.truncate(AES_NONCELEN);
+                    *aesecb_locked = vec;
 
-                        if let Ok(uid) = b64decode(&uid) {
-                            let cipher = Aes128Ecb::new_var(&*aesecb_locked, Default::default()).unwrap();
-                            let uid = cipher.encrypt_vec(&uid);
-                            let cipher = Aes128Ecb::new_var(&*aesecb_locked, Default::default()).unwrap();
-                            let channel = cipher.encrypt_vec(&channel);
+                    let cipher = Aes128Ecb::new_var(&*aesecb_locked, Default::default()).unwrap();
+                    let uid = cipher.encrypt_vec(&uid.into_bytes());
+                    let cipher = Aes128Ecb::new_var(&*aesecb_locked, Default::default()).unwrap();
+                    let channel = cipher.encrypt_vec(&channel.into_bytes());
 
-                            //create hash for verification
-                            keys.push(b64encode(&uid));
-                            keys.push(b64encode(&channel));
-                            key = Some(MsgHdr::do_hash(&keys));
-                            cid = Some(MsgHdr::select_cid(key.unwrap()));
-                            cid_val = cid.unwrap();
-                            println!("Adding TLS client with cid {:x}", cid.unwrap());
-                        }
-                        else {
-                            return Err(Error::new(ErrorKind::BrokenPipe, "broken pipe"));
-                        }
-                    }
-                    else {
-                        return Err(Error::new(ErrorKind::BrokenPipe, "broken pipe"));
-                    }
+                    //create hash for verification
+                    keys.push(b64encode(&uid));
+                    keys.push(b64encode(&channel));
+                    key = Some(MsgHdr::do_hash(&keys));
+                    cid = Some(MsgHdr::select_cid(key.unwrap()));
+                    cid_val = cid.unwrap();
+                    println!("Adding TLS client with cid {:x}", cid.unwrap());
                 }
                 let aeschannel_locked = aeschannel_inner.lock().unwrap();
                 let aeskey = GenericArray::from_slice(&*aeschannel_locked);
                 let aesecb_locked = aesecb_inner.lock().unwrap();
                 let aesecbkey = &*aesecb_locked;
 
-                let cuid;
-                let cchannel;
-                if let Ok(uid) = b64decode(uid) {
-                    let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
-                    cuid = cipher.encrypt_vec(&uid);
-                }
-                else {
-                    return Err(Error::new(ErrorKind::BrokenPipe, "broken pipe"));
-                }
-                if let Ok(channel) = b64decode(channel) {
-                    let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
-                    cchannel = cipher.encrypt_vec(&channel);
-                }
-                else {
-                    return Err(Error::new(ErrorKind::BrokenPipe, "broken pipe"));
-                }
+                let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
+                let cuid = cipher.encrypt_vec(&uid.clone().into_bytes());
+                let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
+                let cchannel = cipher.encrypt_vec(&channel.clone().into_bytes());
 
                 decoded_message = decoded_message.set_uid(b64encode(&cuid));
                 decoded_message = decoded_message.set_channel(b64encode(&cchannel));
@@ -630,9 +605,19 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
         else {
             return Ok(());
         }
-
-        decoded_message = decoded_message.set_uid(b64encode(&duid));
-        decoded_message = decoded_message.set_channel(b64encode(&dchannel));
+       
+        if let Ok(duid) = String::from_utf8(duid) {
+            decoded_message = decoded_message.set_uid(duid);
+        }
+        else {
+            return Ok(());
+        }
+        if let Ok(dchannel) = String::from_utf8(dchannel) {
+            decoded_message = decoded_message.set_channel(dchannel);
+        }
+        else {
+            return Ok(());
+        }
 
         let msg: &mut Vec<u8> = decoded_message.get_mut_message();
         let mut aesnonce = Vec::with_capacity(AES_NONCELEN);
