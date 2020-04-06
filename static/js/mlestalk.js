@@ -333,15 +333,15 @@ function sendInitJoin() {
 
 function send(isFull) {
 	var message = $('#input_message').val();
-	var file = document.getElementById("input_file").files[0];
+	//var file = document.getElementById("input_file").files[0];
 
-	if(file) {
-		send_image(myname, mychannel, file);
-	        document.getElementById("input_file").value = "";
-	}
-	else {
+	//if(file) {
+	//	send_image(myname, mychannel, file);
+	//        document.getElementById("input_file").value = "";
+	//}
+	//else {
 		send_message(myname, mychannel, message, isFull);
-	}
+	//}
 }
 
 function chan_exit() {
