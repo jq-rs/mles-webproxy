@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- * Copyright (c) 2019 MlesTalk developers
+ * Copyright (c) 2019-2020 MlesTalk developers
  */
 var myname = '';
 var mychannel = '';
@@ -27,13 +27,15 @@ var initOk = false;
 const RETIMEOUT = 1500; /* ms */
 const MAXTIMEOUT = 1000*60*5; /* ms */
 const MAXQLEN = 32;
-const RESYNC_TIMEOUT = 15000; /* ms */
+const RESYNC_TIMEOUT = 5000; /* ms */
 const LED_ON_TIME = 500; /* ms */
 const LED_OFF_TIME = 2500; /* ms */
 const SCROLL_TIME = 500; /* ms */
 const ASYNC_SLEEP = 3 /* ms */
 var reconn_timeout = RETIMEOUT;
 var reconn_attempts = 0;
+
+const DATELEN = 13;
 
 var isTokenChannel = false;
 var sipkey;
@@ -44,6 +46,7 @@ var lastWrittenMsg = "";
 var lastMessageSeenTs = 0;
 var lastReconnectTs = 0;
 var lastMessage = {};
+var lastMessageSendOrRcvdDate = "";
 
 var weekday = new Array(7);
 weekday[0] = "Sun";
@@ -164,21 +167,11 @@ function stamptime(msgdate) {
 	if(dd<10) dd='0'+dd;
 	if(mm<10) mm='0'+mm;
 	if(m<10) m='0'+m;
-	return dd + '.' + mm + '.' + yyyy + ' ' + day + ' ' + h + ':' + m;
+	return day + ' ' + dd + '.' + mm + '.' + yyyy + ' ' + h + ':' + m;
 }
 
-function timenow(){
-	var now=new Date(), 
-		dd=now.getDate(),
-		mm=now.getMonth()+1,
-		yyyy=now.getFullYear(),
-		h=now.getHours(), 
-		m=now.getMinutes(), 
-		day=weekday[now.getDay()];
-	if(dd<10) dd='0'+dd;
-	if(mm<10) mm='0'+mm;
-	if(m<10) m='0'+m;
-	return dd + '.' + mm + '.' + yyyy + ' ' + day + ' ' + h + ':' + m;
+function timenow() {
+	return stamptime(new Date());
 }
 
 var can_notify = false;
@@ -186,7 +179,7 @@ var will_notify = false;
 var isCordova = false;
 var isReconnect = false;
 
-var webWorker = new Worker('js/mlestalk-webworker/js/webworker.js');
+var webWorker = new Worker('mlestalk-webworker/js/webworker.js');
 
 function onPause() {
 	will_notify = true;
@@ -340,15 +333,15 @@ function sendInitJoin() {
 
 function send(isFull) {
 	var message = $('#input_message').val();
-	//var file = document.getElementById("input_file").files[0];
+	var file = document.getElementById("input_file").files[0];
 
-	//if(file) {
-	//	send_image(myname, mychannel, file);
-	//	document.getElementById("input_file").value = "";
-	//}
-	//else {
+	if(file) {
+		send_image(myname, mychannel, file);
+	        document.getElementById("input_file").value = "";
+	}
+	else {
 		send_message(myname, mychannel, message, isFull);
-	//}
+	}
 }
 
 function chan_exit() {
@@ -521,6 +514,10 @@ webWorker.onmessage = function(e) {
 			}
 
 			if(idtimestamp[uid] <= msgTimestamp) {
+				var li;
+				var date;
+				var time;
+
 				if(isFull && 0 == message.length) /* Ignore init messages in timestamp processing */
 					break;
 				
@@ -542,19 +539,23 @@ webWorker.onmessage = function(e) {
 				if(0 == message.length)
 					break;
 
-				var li;
-
-				dateString = update_datestring(dateString);
+				date = update_dateval(dateString);
+				if(date) {
+					/* Update new date header */
+					li = '<li class="new"> - <span class="name">' + date + '</span> - </li>';
+					$('#messages').append(li);
+				}
+				time = update_time(dateString);
 
 				/* Check first is it a text or image */
 				if(isImage) {
 					if (uid != myname) {
-						li = '<div id="' + duid + '' + idhash[duid] + '"><li class="new"><span class="name">' + uid + '</span> ' + dateString 
-							+ '<img class="image" src="' + message + '" height="100px" data-action="zoom" alt="">';
+						li = '<div id="' + duid + '' + idhash[duid] + '"><li class="new"><span class="name">' + uid + '</span> ' + time +
+							 '<img class="image" src="' + message + '" height="100px" data-action="zoom" alt="">';
 
 						}
 					else {
-						li = '<div id="' + duid + '' + idhash[duid] + '"><li class="own"> ' + dateString
+						li = '<div id="' + duid + '' + idhash[duid] + '"><li class="own"> ' + time
 							+ '<img class="image" src="' + message + '" height="100px" data-action="zoom" alt="">';
 
 					}
@@ -563,10 +564,10 @@ webWorker.onmessage = function(e) {
 				else {
 					if (uid != myname) {
 						li = '<div id="' + duid + '' + idhash[duid] + '"><li class="new"><span class="name"> ' + uid + '</span> '
-							+ dateString + "" + autolinker.link( message ) + '</li></div>';
+							+ time + "" + autolinker.link( message ) + '</li></div>';
 					}
 					else {
-						li = '<div id="' + duid + '' + idhash[duid] + '"><li class="own"> ' + dateString + "" + autolinker.link( message ) + '</li></div>';
+						li = '<div id="' + duid + '' + idhash[duid] + '"><li class="own"> ' + time + "" + autolinker.link( message ) + '</li></div>';
 					}
 				}
 
@@ -626,16 +627,25 @@ webWorker.onmessage = function(e) {
 	}
 }
 
-function update_datestring(dateString) {
-	var now = timenow();
-	if (dateString.charAt(1) == now.charAt(0) && dateString.charAt(2) == now.charAt(1) &&
-		dateString.charAt(4) == now.charAt(3) && dateString.charAt(5) == now.charAt(4) &&
-		dateString.charAt(7) == now.charAt(6) && dateString.charAt(8) == now.charAt(7) &&
-		dateString.charAt(9) == now.charAt(8) && dateString.charAt(10) == now.charAt(9)) {
-		dateString = dateString.slice(13 + weekday[0].length, dateString.length);
-		dateString = "[" + dateString;
+function update_dateval(dateString) {
+	var lastDate = lastMessageSendOrRcvdDate;
+	const begin = weekday[0].length+2;
+	const end = DATELEN+1;
+	if (lastDate != "" &&
+		dateString.slice(begin, end) == lastDate.slice(begin, end))
+	{
+		return null;
 	}
-	return dateString;
+	else {
+		var dateval = dateString.slice(1, DATELEN + weekday[0].length - 1);
+		lastMessageSendOrRcvdDate = dateString;
+		return dateval;
+	}
+}
+
+function update_time(dateString) {
+	var time = "[" + dateString.slice(DATELEN + weekday[0].length, dateString.length);
+	return time;
 }
 
 function do_notify(uid, channel, msgTimestamp, message) {
@@ -720,14 +730,21 @@ function send_data(cmd, uid, channel, data, isFull, isImage, isMultipart, isFirs
 function update_after_send(message, isFull, isImage) {
 
 	var dateString = "[" + timenow() + "] ";
-	dateString = update_datestring(dateString);
+	var date = update_dateval(dateString);
+	var time = update_time(dateString);
 	var li;
 
+	if(date) {
+		/* Update new date header */
+		li = '<li class="own"> - <span class="name">' + date + '</span> - </li>';
+		$('#messages').append(li);
+	}
+
 	if(!isImage) {
-		li = '<div id="owner' + ownid + '"><li class="own"> ' + dateString + "" + autolinker.link( message ) + '</li></div>';
+		li = '<div id="owner' + ownid + '"><li class="own"> ' + time + "" + autolinker.link( message ) + '</li></div>';
 	}
 	else {
-		li = '<div id="owner' + ownid + '"><li class="own"> ' + dateString
+		li = '<div id="owner' + ownid + '"><li class="own"> ' + time
 			 + '<img class="image" src="' + message + '" height="100px" data-action="zoom" alt=""></li></div>';
 	}
 
