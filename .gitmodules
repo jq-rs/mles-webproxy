@@ -1,3 +1,0 @@
-[submodule "static/js/mlestalk-webworker"]
-	path = static/js/mlestalk-webworker
-	url = https://github.com/jq-rs/mlestalk-webworker.git
