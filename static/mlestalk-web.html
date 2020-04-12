@@ -27,7 +27,7 @@
 		<div class="body_cont">
 			<div id="name_channel_cont" class="box_with_shadow">
 				<form id="channel_submit" method="post">
-					<div style="float:right;"><select id="channel_localization" onchange="set_language();">
+					<div style="float:right;"><select id="channel_localization" onchange="setLanguage()">
 						<option value="gb">🇬🇧</option>
 						<option value="es">🇪🇸</option>
 						<option value="de">🇩🇪</option>
@@ -70,15 +70,15 @@
 				<div id="input_message_cont">
 					<form id="form_send_message" method="post" action="#">
 						<div class="field">
-							<input type="submit" id="the_send" onclick="send(true);" value="&#9166;" />
-							<span><input type="text" id="input_message" oninput="send(false);" autocomplete="off" autofocus /></span>
+							<input type="submit" id="the_send" onclick="send(true)" value="&#9166;" />
+							<span><input type="text" id="input_message" oninput="send(false)" autocomplete="off" autofocus /></span>
 							<br />
 						</div>
 					</form>
 				</div>
 				<div class="field">
 					<form>
-						<input id="channel_exit" class="exit_button" type="button" value="exit" onclick="chan_exit()" />
+						<input id="channel_exit" class="exit_button" type="button" value="exit" onclick="chanExit()" />
 					</form>
 				</div>
 			</div>
