@@ -399,8 +399,11 @@ function closeSocket() {
 
 	gLastMessageSeenTs = 0;
 
-	//empty send queue
-	q.flush(q.getLength());
+	let q = uidQueueGet(gMyName);
+	if(q) {
+		//empty send queue
+		q.flush(q.getLength());
+	}
 
 	//guarantee that websocket gets closed without reconnect
 	let tmpname = gMyName;
