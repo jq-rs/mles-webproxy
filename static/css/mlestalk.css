@@ -13,6 +13,10 @@ a {
     padding: 0;
 }
 
+.top_section {
+	height: 82vh;
+}
+
 .fuchsia {
     color: #77407b;
 }
@@ -23,10 +27,6 @@ a {
     -moz-box-shadow: 0px 0px 2px 1px #e5e5e5;
     -webkit-box-shadow: 0px 0px 2px 1px #e5e5e5;
     box-shadow: 0px 0px 2px 1px #e5e5e5;
-}
-
-.top_section {
-    height: 82vh;
 }
 
 select {
@@ -118,10 +118,18 @@ input.exit_button {
     display: inline-block;
     float: rigth;
     width: 100px;
-    font-size: 14px;
+    font-size: 16px;
 }
 
 #message_cont {
+    display: none;
+    width: auto;
+    margin: 8px 8px auto;
+    background: #fff;
+    padding: 1px 0 0 0;
+}
+
+#presence_cont {
     display: none;
     width: auto;
     margin: 8px 8px auto;
@@ -135,6 +143,39 @@ input.exit_button {
     margin: 8px 8px auto;
     background: #fff;
     padding: 1px 0 0 0;
+}
+
+#presence_list {
+    margin: 10px;
+    padding: 0;
+	overflow: scroll;
+    overflow-x: hidden;
+}
+
+#presence_avail {
+    margin: 0px;
+    padding: 0;
+    height: 230px;
+}
+
+#presence_avail li {
+    list-style: none;
+    font-family: sans-serif;
+    font-size: 16px;
+    padding: 1px 4px;
+}
+
+#presence_avail li.new,#presence_avail li.exit {
+    font-style: italic;
+    color: #bbbbcf;
+}
+
+#mpresence_avail li.own {
+    color: #bbbbce;
+}
+
+#presence_avail li span.name {
+    color: #77407b;
 }
 
 #messages_list {
@@ -153,7 +194,7 @@ input.exit_button {
 #messages li {
     list-style: none;
     font-family: sans-serif;
-    font-size: 14px;
+    font-size: 16px;
     padding: 1px 4px;
 }
 

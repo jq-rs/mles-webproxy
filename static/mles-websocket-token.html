@@ -17,26 +17,29 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width">
 	</head>
-	<script src="js/jquery-3.3.1.min.js"></script>
+	<script src="js/jquery-3.5.1.min.js"></script>
 	<script src="js/Autolinker.min.js"></script>
 	<!-- <script src="js/qrcode.min.js"></script> -->
 	<script src="js/siphash.js"></script>
 	<!-- <script src="cordova.js"></script> -->
 	<script src="js/mlestalk.js"></script>
+	<script src="js/language.js"></script>
 	
 	<body onload="onLoad()">
 		<div class="body_cont">
 			<div id="name_channel_cont" class="box_with_shadow">
 				<form id="channel_submit" method="post">
-					<div style="float:right;"><select id="channel_localization" onchange="setLanguage();">
-						<option value="gb">🇬🇧</option>
-						<option value="es">🇪🇸</option>
-						<option value="de">🇩🇪</option>
-						<option value="fr">🇫🇷</option>
-						<option value="fi">🇫🇮</option>
-						<option value="se">🇸🇪</option>
+					<div style="float:right;"><select id="channel_localization" onchange="setLanguage()">
+							<option value="gb">🇬🇧</option>
+							<option value="fi">🇫🇮</option>
+							<option value="es">🇪🇸</option>
+							<option value="pt">🇵🇹</option>
+							<option value="de">🇩🇪</option>
+							<option value="fr">🇫🇷</option>
+							<option value="ru">🇷🇺</option>
+							<option value="se">🇸🇪</option>
 					</select></div><br />
-					<p id="token_title">MlesTalk invitation!</p>
+					<p id="token_title">MlesTalk!</p>
 					<p id="channel_user_name">Your name?</p>
 					<input type="text" id="input_name" />
 					<p id="channel_key">Shared key?</p>
