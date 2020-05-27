@@ -1,6 +1,6 @@
 # mles-webproxy
 
-Mles-WebProxy is an Mles WebSocket proxy service for [Mles](https://github.com/jq-rs/mles-rs) WebSocket protocols, like [MlesTalk](https://mles.io/app.html). It receives traffic over TLS and forwards it transformed to AES towards Mles server (and vice versa).
+mles-webproxy is an Mles WebSocket proxy service for [Mles](https://github.com/jq-rs/mles-rs) WebSocket protocols, like [MlesTalk](https://mles.io/app.html). It receives traffic over TLS and forwards it transformed to AES towards Mles server (and vice versa).
 
 ## Example how to create your own personal proxy server
 
