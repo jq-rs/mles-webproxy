@@ -1,12 +1,12 @@
 [Unit]
-Description=Arkiserver Service
+Description=Mles WebProxy Service
 
 [Service]
-WorkingDirectory = /home/ubuntu/www/arki-server
-ExecStart = /home/ubuntu/www/arki-server/arkiserver-manage.sh start
-ExecStop = /home/ubuntu/www/arki-server/arkiserver-manage.sh stop
+WorkingDirectory = /home/ubuntu/www/mles-webproxy
+ExecStart = /home/ubuntu/www/mles-webproxy/mles-webproxy-manage.sh start
+ExecStop = /home/ubuntu/www/mles-webproxy/mles-webproxy-manage.sh stop
 Restart=always
 
 [Install]
 WantedBy=multi-user.target
-Alias=arkiserver.service
+Alias=mles-webproxy.service
