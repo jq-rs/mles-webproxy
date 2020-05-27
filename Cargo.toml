@@ -1,5 +1,5 @@
 [package]
-name = "arki-server"
+name = "mles-webproxy"
 version = "0.7.0"
 authors = ["jq-rs"]
 edition = "2018"

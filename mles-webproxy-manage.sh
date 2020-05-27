@@ -1,11 +1,11 @@
 #!/bin/sh 
 
 start() {
-  exec /home/ubuntu/www/arki-server/target/release/arki-server /home/ubuntu/www/arki-server/static jq-rs@mles.io mles.io 127.0.0.1:8077
+  exec /home/ubuntu/www/mles-webproxy/target/release/mles-webproxy /home/ubuntu/www/mles-webproxy/static jq-rs@mles.io mles.io 127.0.0.1:8077
 }
 
 stop() {
-  exec killall arki-server  
+  exec pkill -f "mles-webproxy"
 }
 
 case $1 in

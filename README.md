@@ -5,10 +5,10 @@ mles-webproxy is an Mles WebSocket proxy service for [Mles](https://github.com/j
 ## Example how to create your own personal proxy server
 
  1. [Install](https://www.rust-lang.org/tools/install) Rust and Cargo package manager to your preferred server
- 2. Clone arki-server repository: `git clone https://github.com/jq-rs/mles-webproxy.git; cd mles-webproxy`
- 3. Compile arki-server: `RUSTFLAGS="-C target-feature=+aes,+ssse3" cargo build --release`
+ 2. Clone mles-webproxy repository: `git clone https://github.com/jq-rs/mles-webproxy.git; cd mles-webproxy`
+ 3. Compile mles-webproxy: `RUSTFLAGS="-C target-feature=+aes,+ssse3" cargo build --release`
  4. Open port 80 and 443 of your firewall for Mles WebSocket protocol and for Let's Encrypt certificates
- 5. Startup arki-server Mles WebSocket proxy in your local server. *Notice: this will try to fetch certificates from Let's Encrypt by default*:  `export MLES_KEY=<secret-key-string-here (or mles-devel-frank for mles.io)>; target/release/mles-webproxy <www-root> <email-for-tls> <domain-for-tls> <mles-srv-addr x.x.x.x:p>`
+ 5. Startup mles-webproxy Mles WebSocket proxy in your local server. *Notice: this will try to fetch certificates from Let's Encrypt by default*:  `export MLES_KEY=<secret-key-string-here (or mles-devel-frank for mles.io)>; target/release/mles-webproxy <www-root> <email-for-tls> <domain-for-tls> <mles-srv-addr x.x.x.x:p>`
      - default ports 80 and 443 need root privileges
  6. Connect to port 443 of your server with Mles WebSocket application
   

@@ -40,7 +40,7 @@ use mles_utils::*;
 
 const KEEPALIVE: u64 = 5;
 const ACCEPTED_PROTOCOL: &str = "mles-websocket";
-const USAGE: &str = "Usage: arkiserver <www-directory> <email-for-tls> <domain-for-tls> <mles-srv-addr x.x.x.x:p>";
+const USAGE: &str = "Usage: mles-webproxy <www-directory> <email-for-tls> <domain-for-tls> <mles-srv-addr x.x.x.x:p>";
 const ADAY: Duration = Duration::from_secs(60 * 60 * 24);
 const AMONTH: Duration = Duration::from_secs(60 * 60 * 24 * 30);
 const SRV_ADDR: &str = "35.157.221.129:8077"; // mles.io
