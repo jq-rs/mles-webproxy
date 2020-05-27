@@ -13,6 +13,7 @@
  6. Connect to port 443 of your server with Mles WebSocket application
   
  Optional: You can configure with provided systemctl scripts the services to be started automatically on server reboot.
+ Optional: To support Web GUI (the QR link), update submodules for `mles-webproxy`: `git submodule update --init --recursive`
  
  Enjoy talking over Mles WebSocket proxy!
  
