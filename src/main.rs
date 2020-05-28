@@ -415,8 +415,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                 }
             }
 
-            let (tcp_sink, tcp_stream) = Bytes.framed(stream).split();
-
+            let (mut tcp_sink, tcp_stream) = Bytes.framed(stream).split();
 
             let mles_rx = mles_rx.map_err(|_| panic!()); // errors not possible on rx XXX
             let mles_rx = mles_rx.and_then(move |buf: Vec<_>| {
@@ -499,7 +498,14 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
             });
 
 
-            let send_wsrx = mles_rx.forward(tcp_sink);
+            let send_wsrx = mles_rx.for_each(move |buf| {
+                let _ = tcp_sink.start_send(buf)
+                    .map_err(|err| Error::new(ErrorKind::Other, err));
+                let _ = tcp_sink.poll_complete()
+                    .map_err(|err| Error::new(ErrorKind::Other, err));
+                Ok(())
+            });
+            
             let write_wstx = tcp_stream.for_each(move |buf| {
                 // send to websocket
                 let _ = ws_tx.start_send(buf.to_vec())
