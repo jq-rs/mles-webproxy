@@ -5,7 +5,7 @@ start() {
 }
 
 stop() {
-  exec pkill -f "mles-webproxy"
+  exec killall mles-webproxy
 }
 
 case $1 in
