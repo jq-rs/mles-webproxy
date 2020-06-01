@@ -5,6 +5,7 @@ use std::thread;
 
 use futures::Sink;
 use futures::sync::mpsc::unbounded;
+use futures::sync::mpsc::UnboundedSender;
 use std::io::{Error, ErrorKind};
 use std::net::SocketAddr;
 use bytes::BytesMut;
@@ -17,6 +18,7 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use std::collections::HashMap;
 use std::str::FromStr;
 
 use blake2::{Blake2s, Digest};
@@ -376,10 +378,13 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
     let aeschannel = Arc::new(Mutex::new(Vec::new()));
     let aesecb = Arc::new(Mutex::new(Vec::new()));
 
+
     let mut cid: Option<u32> = None;
     let mut key: Option<u64> = None;
     let keys = Arc::new(Mutex::new(Vec::new()));
     let mut cid_val = 0;
+
+    let channel_map: Arc<Mutex<HashMap<u32, UnboundedSender<_>>>> = Arc::new(Mutex::new(HashMap::new()));
 
     let (ws_tx, ws_rx) = unbounded();
     let (mut mles_tx, mles_rx) = unbounded();
@@ -564,6 +569,11 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
             cid_val = cid.unwrap();
             println!("Adding TLS client with cid {:x}", cid.unwrap());
         }
+        else {
+            cid = Some(MsgHdr::select_cid(key.unwrap()));
+            cid_val = cid.unwrap();
+        }
+
         let aeschannel_locked = aeschannel_inner.lock().unwrap();
         let aeskey = GenericArray::from_slice(&*aeschannel_locked);
         let aesecb_locked = aesecb_inner.lock().unwrap();
@@ -592,80 +602,94 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
         let msghdr = MsgHdr::new(cbuf.len() as u32, cid.unwrap(), key.unwrap());
         let mut msgv = msghdr.encode();
         msgv.extend(cbuf);
-        Ok(msgv)
+        Ok((cid_val, msgv))
     });
 
     let keyval_inner = keyval.clone();
     let keyaddr_inner = keyaddr.clone();
     let ws_tx_inner = ws_tx.clone();
     let keys_inner = keys.clone();
-    let send_wsrx = mles_rx.for_each(move |buf| {
-        //look into hash map
-        //if exists, use that
-        //if not, connect with tcp
-        let keyval = keyval_inner.clone();
-        let keyaddr = keyaddr_inner.clone();
-        let keys = keys_inner.clone();
-        let mut ws_tx = ws_tx_inner.clone();
-        let tcp = TcpStream::connect(&raddr);
-        let client = tcp
-            .and_then(move |stream| {
-                let _val = stream
-                    .set_nodelay(true)
-                    .map_err(|_| panic!("Cannot set to no delay"));
-                let _val = stream
-                    .set_keepalive(Some(Duration::new(KEEPALIVE, 0)))
-                    .map_err(|_| panic!("Cannot set keepalive"));
-                let laddr = match stream.local_addr() {
-                    Ok(laddr) => laddr,
-                    Err(_) => {
-                        let addr = "0.0.0.0:0";
-                        addr.parse::<SocketAddr>().unwrap()
-                    }
-                };
-                let keyval_inner = keyval.clone();
-                let keyaddr_inner = keyaddr.clone();
-                let keys_inner = keys.clone();
-
-                let mut keys = keys_inner.lock().unwrap();
-                if !keyval_inner.is_empty() {
-                    keys.push(keyval_inner);
-                } else {
-                    keys.push(MsgHdr::addr2str(&laddr));
-                    if !keyaddr_inner.is_empty() {
-                        keys.push(keyaddr_inner);
-                    }
-                }
-
-                let (mut tcp_sink, tcp_stream) = Bytes.framed(stream).split();
-
-                let write_wstx = tcp_stream.for_each(move |buf| {
-                    // send to websocket
-                    let _ = ws_tx.start_send(buf.to_vec())
-                        .map_err(|err| Error::new(ErrorKind::Other, err));
-                    let _ = ws_tx.poll_complete()
-                        .map_err(|err| Error::new(ErrorKind::Other, err));
-                    Ok(())
-                });
-
-                let _ = tcp_sink.start_send(buf)
+    let channel_map_inner = channel_map.clone();
+    let send_wsrx = mles_rx.for_each(move |(cid_val, buf)| {
+        let (tcp_sink_tx, tcp_sink_rx) = unbounded();
+        let mut channel_map = channel_map_inner.lock().unwrap();
+        match channel_map.get(&cid_val) {
+            Some(mut tcp_sink_tx) => { 
+                let _ = tcp_sink_tx.start_send(buf)
                     .map_err(|err| Error::new(ErrorKind::Other, err));
-                let _ = tcp_sink.poll_complete()
+                let _ = tcp_sink_tx.poll_complete()
                     .map_err(|err| Error::new(ErrorKind::Other, err));
+            },
+            None => {
+                let keyval = keyval_inner.clone();
+                let keyaddr = keyaddr_inner.clone();
+                let keys = keys_inner.clone();
+                let mut ws_tx = ws_tx_inner.clone();
 
-                //save tcp sink to hashmap
+                channel_map.insert(cid_val, tcp_sink_tx);
 
-                write_wstx.map(|_| ())
-                .then(|_| Ok(()))
-        })
-        .map_err(move |_| { });
-        tokio::spawn(client);
+                let tcp = TcpStream::connect(&raddr);
+                let client = tcp
+                    .and_then(move |stream| {
+                        let _val = stream
+                            .set_nodelay(true)
+                            .map_err(|_| panic!("Cannot set to no delay"));
+                        let _val = stream
+                            .set_keepalive(Some(Duration::new(KEEPALIVE, 0)))
+                            .map_err(|_| panic!("Cannot set keepalive"));
+                        let laddr = match stream.local_addr() {
+                            Ok(laddr) => laddr,
+                            Err(_) => {
+                                let addr = "0.0.0.0:0";
+                                addr.parse::<SocketAddr>().unwrap()
+                            }
+                        };
+                        let keyval_inner = keyval.clone();
+                        let keyaddr_inner = keyaddr.clone();
+                        let keys_inner = keys.clone();
 
+                        let mut keys = keys_inner.lock().unwrap();
+                        if !keyval_inner.is_empty() {
+                            keys.push(keyval_inner);
+                        } else {
+                            keys.push(MsgHdr::addr2str(&laddr));
+                            if !keyaddr_inner.is_empty() {
+                                keys.push(keyaddr_inner);
+                            }
+                        }
+
+                        let (mut tcp_sink, tcp_stream) = Bytes.framed(stream).split();
+
+                        let write_tcp = tcp_sink_rx.for_each(move |buf| {
+                            let _ = tcp_sink.start_send(buf.to_vec())
+                                .map_err(|err| Error::new(ErrorKind::Other, err));
+                            let _ = tcp_sink.poll_complete()
+                                .map_err(|err| Error::new(ErrorKind::Other, err));
+                            Ok(())
+                        })
+                        .map_err(|_| ());
+
+                        let write_wstx = tcp_stream.for_each(move |buf| {
+                            // send to websocket
+                            let _ = ws_tx.start_send(buf.to_vec())
+                                .map_err(|err| Error::new(ErrorKind::Other, err));
+                            let _ = ws_tx.poll_complete()
+                                .map_err(|err| Error::new(ErrorKind::Other, err));
+                            Ok(())
+                        })
+                        .map_err(|_| ());
+
+                        write_tcp
+                            .map(|_| ())
+                            .select(write_wstx.map(|_| ()))
+                            .then(|_| Ok(()))
+                    })
+                .map_err(move |_| { });
+                tokio::spawn(client);
+            }
+        }
         Ok(())
     });
-
-
-
 
     let ws_writer = combined_rx.fold(sink, move |mut sink, msg| {
         let _ = sink
