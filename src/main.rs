@@ -384,7 +384,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
     let keys = Arc::new(Mutex::new(Vec::new()));
     let mut cid_val = 0;
 
-    let channel_map: Arc<Mutex<HashMap<u32, UnboundedSender<_>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let channel_map: Arc<Mutex<HashMap<String, UnboundedSender<_>>>> = Arc::new(Mutex::new(HashMap::new()));
 
     let (ws_tx, ws_rx) = unbounded();
     let (mut mles_tx, mles_rx) = unbounded();
@@ -534,6 +534,8 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
             return Err(Error::new(ErrorKind::BrokenPipe, "broken pipe"));
         }
 
+        let channel_name = channel.clone();
+
         if None == key {
             let channel = channel.clone();
             let uid = uid.clone();
@@ -602,7 +604,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
         let msghdr = MsgHdr::new(cbuf.len() as u32, cid.unwrap(), key.unwrap());
         let mut msgv = msghdr.encode();
         msgv.extend(cbuf);
-        Ok((cid_val, msgv))
+        Ok((channel_name, cid_val, msgv))
     });
 
     let keyval_inner = keyval.clone();
@@ -610,11 +612,12 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
     let ws_tx_inner = ws_tx.clone();
     let keys_inner = keys.clone();
     let channel_map_inner = channel_map.clone();
-    let send_wsrx = mles_rx.for_each(move |(cid_val, buf)| {
+    let send_wsrx = mles_rx.for_each(move |(channel, cid_val, buf)| {
         let (tcp_sink_tx, tcp_sink_rx) = unbounded();
         let mut channel_map = channel_map_inner.lock().unwrap();
-        match channel_map.get(&cid_val) {
+        match channel_map.get(&channel) {
             Some(mut tcp_sink_tx) => { 
+                println!("Using saved sink for cid {:x} channel {} transmissions", cid_val, channel);
                 let _ = tcp_sink_tx.start_send(buf)
                     .map_err(|err| Error::new(ErrorKind::Other, err));
                 let _ = tcp_sink_tx.poll_complete()
@@ -626,7 +629,8 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                 let keys = keys_inner.clone();
                 let mut ws_tx = ws_tx_inner.clone();
 
-                channel_map.insert(cid_val, tcp_sink_tx);
+                println!("Just inserting cid {:x} channel {} for hashmap", cid_val, channel);
+                channel_map.insert(channel, tcp_sink_tx.clone());
 
                 let tcp = TcpStream::connect(&raddr);
                 let client = tcp
@@ -660,14 +664,22 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
 
                         let (mut tcp_sink, tcp_stream) = Bytes.framed(stream).split();
 
+                        println!("Sending to tcp sink for cid {:x}", cid_val);
+                        //Send the message
+                        let _ = tcp_sink.start_send(buf)
+                            .map_err(|err| Error::new(ErrorKind::Other, err));
+                        let _ = tcp_sink.poll_complete()
+                            .map_err(|err| Error::new(ErrorKind::Other, err));
+
                         let write_tcp = tcp_sink_rx.for_each(move |buf| {
+                            println!("Forwarding to tcp sink");
                             let _ = tcp_sink.start_send(buf.to_vec())
                                 .map_err(|err| Error::new(ErrorKind::Other, err));
                             let _ = tcp_sink.poll_complete()
                                 .map_err(|err| Error::new(ErrorKind::Other, err));
                             Ok(())
                         })
-                        .map_err(|_| ());
+                        .map_err(|err|{println!("Got error {:#?} to write_tcp!", err); ()});
 
                         let write_wstx = tcp_stream.for_each(move |buf| {
                             // send to websocket
@@ -677,7 +689,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                                 .map_err(|err| Error::new(ErrorKind::Other, err));
                             Ok(())
                         })
-                        .map_err(|_| ());
+                        .map_err(|err|{println!("Got error {:#?} to write_wstx!", err); ()});
 
                         write_tcp
                             .map(|_| ())
