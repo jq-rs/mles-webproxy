@@ -513,7 +513,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
         Ok(())
     });
 
-    let mles_rx = mles_rx.map_err(|_| panic!("Mles rx just got an error")); //XXX fix this!
+    let mles_rx = mles_rx.map_err(|_| panic!("Mles rx just got an error")); //no errors on RX 
 
     let keyval_inner = keyval.clone();
     let keyaddr_inner = keyaddr.clone();
