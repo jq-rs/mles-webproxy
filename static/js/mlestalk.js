@@ -389,16 +389,16 @@ function sendInitJoin() {
 
 function send(isFull) {
 	let message = $('#input_message').val();
-	let file = document.getElementById("input_file").files[0];
+	//let file = document.getElementById("input_file").files[0];
 
-	if (file) {
-		sendImage(file);
-		document.getElementById("input_file").value = "";
-	}
-	else {
+	//if (file) {
+	//	sendImage(file);
+	//	document.getElementById("input_file").value = "";
+	//}
+	//else {
 		sendMessage(message, isFull, false);
 		updateAfterSend(message, isFull, false);
-	}
+	//}
 }
 
 function chanExit() {
@@ -650,6 +650,8 @@ function processData(uid, channel, msgTimestamp,
 			$('#messages').append(li);
 			gIdAppend[duid] = true;
 		}
+		else
+			$('#' + duid + '' + gIdHash[duid]).replaceWith(li);
 
 		if (isFull) {
 			gIdHash[duid] = gIdHash[duid] + 1;
@@ -657,9 +659,6 @@ function processData(uid, channel, msgTimestamp,
 			if (isCordova && gLastReconnectTs < msgTimestamp) {
 				cordova.plugins.notification.badge.increase();
 			}
-		}
-		else if (true == gIdAppend[duid]) {
-			$('#' + duid + '' + gIdHash[duid]).replaceWith(li);
 		}
 
 		if (isFull || $('#input_message').val().length == 0) {
