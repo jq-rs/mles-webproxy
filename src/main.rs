@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use blake2::{Blake2s, Digest};
-use aes::block_cipher_trait::generic_array::GenericArray;
+use aes::block_cipher::generic_array::GenericArray;
 use block_modes::{BlockMode, Ecb};
 use block_modes::block_padding::Pkcs7;
 use aes::Aes128;
@@ -525,9 +525,25 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
     let aeschannel_inner = aeschannel.clone();
     let aesecb_inner = aesecb.clone();
     let send_wsrx = mles_rx.for_each(move |buf| {
-        if buf.is_empty() {
-            //println!("Empty buffer!");
-            return Ok(());
+         if buf.is_empty() {
+             let mut chanvec = Vec::new();
+             {
+                 let channel_map = channel_map_inner.lock().unwrap();
+                 let mut keymap_inner = keymap.lock().unwrap();
+                 for (channel, mut tcp_sink_tx) in channel_map.iter() {
+                     let _ = keymap_inner.remove(channel);
+                     chanvec.push(channel.clone());
+                     let _ = tcp_sink_tx.start_send(buf.clone())
+                         .map_err(|err| Error::new(ErrorKind::Other, err));
+                     let _ = tcp_sink_tx.poll_complete()
+                         .map_err(|err| Error::new(ErrorKind::Other, err));
+                 }
+             }
+             let mut channel_map = channel_map_inner.lock().unwrap();
+             for chan in &chanvec {
+                 let _ = channel_map.remove(chan);
+             }
+             return Ok(());
         }
         let mut decoded_message = Msg::decode(buf.as_slice());
 
@@ -631,16 +647,16 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                         let mut aesecb_locked = aesecb.lock().unwrap();
 
                         let mut hasher = Blake2s::new();
-                        hasher.input(channel_clone.clone());
-                        let mut vec: Vec<u8> = hasher.result().as_slice().to_vec();
+                        hasher.update(channel_clone.clone());
+                        let mut vec: Vec<u8> = hasher.finalize().as_slice().to_vec();
                         vec.truncate(AES_NONCELEN);
                         *aeschannel_locked = vec;
 
                         let mut hasher_ecb = Blake2s::new();
-                        hasher_ecb.input(channel_clone.clone());
+                        hasher_ecb.update(channel_clone.clone());
                         let mut hasher_ecb_final = Blake2s::new();
-                        hasher_ecb_final.input(hasher_ecb.result().as_slice());
-                        let mut vec: Vec<u8> = hasher_ecb_final.result().as_slice().to_vec();
+                        hasher_ecb_final.update(hasher_ecb.finalize().as_slice());
+                        let mut vec: Vec<u8> = hasher_ecb_final.finalize().as_slice().to_vec();
                         vec.truncate(AES_NONCELEN);
                         *aesecb_locked = vec;
 
