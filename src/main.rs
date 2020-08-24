@@ -5,6 +5,7 @@ use std::thread;
 
 use futures::Sink;
 use futures::sync::mpsc::unbounded;
+use futures::sync::mpsc::UnboundedSender;
 use std::io::{Error, ErrorKind};
 use std::net::SocketAddr;
 use bytes::BytesMut;
@@ -17,10 +18,11 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use std::collections::HashMap;
 use std::str::FromStr;
 
 use blake2::{Blake2s, Digest};
-use aes::block_cipher_trait::generic_array::GenericArray;
+use aes::block_cipher::generic_array::GenericArray;
 use block_modes::{BlockMode, Ecb};
 use block_modes::block_padding::Pkcs7;
 use aes::Aes128;
@@ -376,152 +378,16 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
     let aeschannel = Arc::new(Mutex::new(Vec::new()));
     let aesecb = Arc::new(Mutex::new(Vec::new()));
 
+
     let mut cid: Option<u32> = None;
     let mut key: Option<u64> = None;
-    let mut keys = Vec::new();
     let mut cid_val = 0;
 
-    let (mut ws_tx, ws_rx) = unbounded();
+    let channel_map: Arc<Mutex<HashMap<String, UnboundedSender<_>>>> = Arc::new(Mutex::new(HashMap::new()));
+
+    let (ws_tx, ws_rx) = unbounded();
     let (mut mles_tx, mles_rx) = unbounded();
     let (mut combined_tx, combined_rx) = unbounded();
-
-    let aeschannel_inner = aeschannel.clone();
-    let aesecb_inner = aesecb.clone();
-    let tcp = TcpStream::connect(&raddr);
-    let client = tcp
-        .and_then(move |stream| {
-            let _val = stream
-                .set_nodelay(true)
-                .map_err(|_| panic!("Cannot set to no delay"));
-            let _val = stream
-                .set_keepalive(Some(Duration::new(KEEPALIVE, 0)))
-                .map_err(|_| panic!("Cannot set keepalive"));
-            let laddr = match stream.local_addr() {
-                Ok(laddr) => laddr,
-                Err(_) => {
-                    let addr = "0.0.0.0:0";
-                    addr.parse::<SocketAddr>().unwrap()
-                }
-            };
-            let keyval_inner = keyval.clone();
-            let keyaddr_inner = keyaddr.clone();
-
-            if !keyval_inner.is_empty() {
-                keys.push(keyval_inner);
-            } else {
-                keys.push(MsgHdr::addr2str(&laddr));
-                if !keyaddr_inner.is_empty() {
-                    keys.push(keyaddr_inner);
-                }
-            }
-
-            let (mut tcp_sink, tcp_stream) = Bytes.framed(stream).split();
-
-            let mles_rx = mles_rx.map_err(|_| panic!()); // errors not possible on rx XXX
-            let mles_rx = mles_rx.and_then(move |buf: Vec<_>| {
-                if buf.is_empty() {
-                    //println!("Empty buffer!");
-                    return Err(Error::new(ErrorKind::BrokenPipe, "broken pipe"));
-                }
-                let mut decoded_message = Msg::decode(buf.as_slice());
-
-                /* Check sanity */
-                let channel  = decoded_message.get_channel();
-                let uid = decoded_message.get_uid();
-
-                if 0 == channel.len() || 0 == uid.len() || decoded_message.get_message_len() <= AES_NONCELEN {
-                    return Err(Error::new(ErrorKind::BrokenPipe, "broken pipe"));
-                }
-
-                if None == key {
-                    let channel = channel.clone();
-                    let uid = uid.clone();
-                    let mut aeschannel_locked = aeschannel_inner.lock().unwrap();
-                    let mut aesecb_locked = aesecb_inner.lock().unwrap();
-
-                    let mut hasher = Blake2s::new();
-                    hasher.input(channel.clone());
-                    let mut vec: Vec<u8> = hasher.result().as_slice().to_vec();
-                    vec.truncate(AES_NONCELEN);
-                    *aeschannel_locked = vec;
-
-                    let mut hasher_ecb = Blake2s::new();
-                    hasher_ecb.input(channel.clone());
-                    let mut hasher_ecb_final = Blake2s::new();
-                    hasher_ecb_final.input(hasher_ecb.result().as_slice());
-                    let mut vec: Vec<u8> = hasher_ecb_final.result().as_slice().to_vec();
-                    vec.truncate(AES_NONCELEN);
-                    *aesecb_locked = vec;
-
-                    let cipher = Aes128Ecb::new_var(&*aesecb_locked, Default::default()).unwrap();
-                    let uid = cipher.encrypt_vec(&uid.into_bytes());
-                    let cipher = Aes128Ecb::new_var(&*aesecb_locked, Default::default()).unwrap();
-                    let channel = cipher.encrypt_vec(&channel.into_bytes());
-
-                    //create hash for verification
-                    keys.push(b64encode(&uid));
-                    keys.push(b64encode(&channel));
-                    key = Some(MsgHdr::do_hash(&keys));
-                    cid = Some(MsgHdr::select_cid(key.unwrap()));
-                    cid_val = cid.unwrap();
-                    println!("Adding TLS client with cid {:x}", cid.unwrap());
-                }
-                let aeschannel_locked = aeschannel_inner.lock().unwrap();
-                let aeskey = GenericArray::from_slice(&*aeschannel_locked);
-                let aesecb_locked = aesecb_inner.lock().unwrap();
-                let aesecbkey = &*aesecb_locked;
-
-                let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
-                let cuid = cipher.encrypt_vec(&uid.clone().into_bytes());
-                let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
-                let cchannel = cipher.encrypt_vec(&channel.clone().into_bytes());
-
-                decoded_message = decoded_message.set_uid(b64encode(&cuid));
-                decoded_message = decoded_message.set_channel(b64encode(&cchannel));
-
-                let msg: &mut Vec<u8> = decoded_message.get_mut_message();
-                let mut aesnonce = Vec::with_capacity(AES_NONCELEN);
-                aesnonce.extend_from_slice(&msg[0..AES_NONCELEN]);
-                let nonce = GenericArray::from_slice(&aesnonce);
-
-                // create cipher instance
-                let mut cipher = Aes128Ctr::new(&aeskey, &nonce);
-                // apply keystream (encrypt)
-                cipher.apply_keystream(&mut msg[AES_NONCELEN..]);
-
-                let cbuf = decoded_message.encode();
-
-                let msghdr = MsgHdr::new(cbuf.len() as u32, cid.unwrap(), key.unwrap());
-                let mut msgv = msghdr.encode();
-                msgv.extend(cbuf);
-                Ok(msgv)
-            });
-
-
-            let send_wsrx = mles_rx.for_each(move |buf| {
-                let _ = tcp_sink.start_send(buf)
-                    .map_err(|err| Error::new(ErrorKind::Other, err));
-                let _ = tcp_sink.poll_complete()
-                    .map_err(|err| Error::new(ErrorKind::Other, err));
-                Ok(())
-            });
-            
-            let write_wstx = tcp_stream.for_each(move |buf| {
-                // send to websocket
-                let _ = ws_tx.start_send(buf.to_vec())
-                    .map_err(|err| Error::new(ErrorKind::Other, err));
-                let _ = ws_tx.poll_complete()
-                    .map_err(|err| Error::new(ErrorKind::Other, err));
-                Ok(())
-            });
-
-            send_wsrx
-                .map(|_| ())
-                .select(write_wstx.map(|_| ()))
-                .then(|_| Ok(()))
-        })
-    .map_err(move |_| { });
-
 
     let (sink, stream) = websocket.split();
 
@@ -647,6 +513,239 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
         Ok(())
     });
 
+    let mles_rx = mles_rx.map_err(|_| panic!("Mles rx just got an error")); //no errors on RX 
+
+    let keyval_inner = keyval.clone();
+    let keyaddr_inner = keyaddr.clone();
+    let ws_tx_inner = ws_tx.clone();
+
+    let keymap: Arc<Mutex<HashMap<String, (u64, u32)>>> = Arc::new(Mutex::new(HashMap::new()));
+
+    let channel_map_inner = channel_map.clone();
+    let aeschannel_inner = aeschannel.clone();
+    let aesecb_inner = aesecb.clone();
+    let send_wsrx = mles_rx.for_each(move |buf| {
+         if buf.is_empty() {
+             let mut chanvec = Vec::new();
+             {
+                 let channel_map = channel_map_inner.lock().unwrap();
+                 let mut keymap_inner = keymap.lock().unwrap();
+                 for (channel, mut tcp_sink_tx) in channel_map.iter() {
+                     let _ = keymap_inner.remove(channel);
+                     chanvec.push(channel.clone());
+                     let _ = tcp_sink_tx.start_send(buf.clone())
+                         .map_err(|err| Error::new(ErrorKind::Other, err));
+                     let _ = tcp_sink_tx.poll_complete()
+                         .map_err(|err| Error::new(ErrorKind::Other, err));
+                 }
+             }
+             let mut channel_map = channel_map_inner.lock().unwrap();
+             for chan in &chanvec {
+                 let _ = channel_map.remove(chan);
+             }
+             return Ok(());
+        }
+        let mut decoded_message = Msg::decode(buf.as_slice());
+
+        /* Check sanity */
+        let channel  = decoded_message.get_channel();
+        let uid = decoded_message.get_uid();
+
+        if 0 == channel.len() || 0 == uid.len() || decoded_message.get_message_len() <= AES_NONCELEN {
+            return Ok(());
+        }
+
+        let channel = channel.to_string();
+        let uid = uid.to_string();
+        let keymap_inner = keymap.clone();
+
+        let mut channel_map = channel_map_inner.lock().unwrap();
+        if let Some(mut tcp_sink_tx) = channel_map.get(&channel) {
+            let aeschannel_locked = aeschannel_inner.lock().unwrap();
+            let aeskey = GenericArray::from_slice(&*aeschannel_locked);
+            let aesecb_locked = aesecb_inner.lock().unwrap();
+            let aesecbkey = &*aesecb_locked;
+
+            let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
+            let cuid = cipher.encrypt_vec(&uid.clone().into_bytes());
+            let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
+            let cchannel = cipher.encrypt_vec(&channel.clone().into_bytes());
+
+            decoded_message = decoded_message.set_uid(b64encode(&cuid));
+            decoded_message = decoded_message.set_channel(b64encode(&cchannel));
+
+            let msg: &mut Vec<u8> = decoded_message.get_mut_message();
+            let mut aesnonce = Vec::with_capacity(AES_NONCELEN);
+            aesnonce.extend_from_slice(&msg[0..AES_NONCELEN]);
+            let nonce = GenericArray::from_slice(&aesnonce);
+
+            // create cipher instance
+            let mut cipher = Aes128Ctr::new(&aeskey, &nonce);
+            // apply keystream (encrypt)
+            cipher.apply_keystream(&mut msg[AES_NONCELEN..]);
+
+            let cbuf = decoded_message.encode();
+
+            let keymap = keymap_inner.lock().unwrap();
+            if let Some((key, cid)) = keymap.get(&channel) {
+                let msghdr = MsgHdr::new(cbuf.len() as u32, *cid, *key);
+                let mut msgv = msghdr.encode();
+                msgv.extend(cbuf);
+                let _ = tcp_sink_tx.start_send(msgv)
+                    .map_err(|err| Error::new(ErrorKind::Other, err));
+                let _ = tcp_sink_tx.poll_complete()
+                    .map_err(|err| Error::new(ErrorKind::Other, err));
+            }
+        }
+        else {
+            let (tcp_sink_tx, tcp_sink_rx) = unbounded();
+            let keyval = keyval_inner.clone();
+            let keyaddr = keyaddr_inner.clone();
+            let mut ws_tx = ws_tx_inner.clone();
+            let aeschannel = aeschannel_inner.clone();
+            let aesecb = aesecb_inner.clone();
+
+            //insert this channel to hashmap (can we do it this early?)
+            channel_map.insert(channel.clone(), tcp_sink_tx.clone());
+
+            let tcp = TcpStream::connect(&raddr);
+            let client = tcp
+                .and_then(move |stream| {
+                    let _val = stream
+                        .set_nodelay(true)
+                        .map_err(|_| panic!("Cannot set to no delay"));
+                    let _val = stream
+                        .set_keepalive(Some(Duration::new(KEEPALIVE, 0)))
+                        .map_err(|_| panic!("Cannot set keepalive"));
+                    let laddr = match stream.local_addr() {
+                        Ok(laddr) => laddr,
+                        Err(_) => {
+                            let addr = "0.0.0.0:0";
+                            addr.parse::<SocketAddr>().unwrap()
+                        }
+                    };
+                    let keyval_inner = keyval.clone();
+                    let keyaddr_inner = keyaddr.clone();
+                    let channel_name = channel.clone();
+
+                    let mut keys = Vec::new();
+                    if !keyval_inner.is_empty() {
+                        keys.push(keyval_inner);
+                    } else {
+                        keys.push(MsgHdr::addr2str(&laddr));
+                        if !keyaddr_inner.is_empty() {
+                            keys.push(keyaddr_inner);
+                        }
+                    }
+                    let (mut tcp_sink, tcp_stream) = Bytes.framed(stream).split();
+
+                    {
+                        // create keys
+                        let channel_clone = channel.clone();
+                        let uid_clone = uid.clone();
+                        let mut aeschannel_locked = aeschannel.lock().unwrap();
+                        let mut aesecb_locked = aesecb.lock().unwrap();
+
+                        let mut hasher = Blake2s::new();
+                        hasher.update(channel_clone.clone());
+                        let mut vec: Vec<u8> = hasher.finalize().as_slice().to_vec();
+                        vec.truncate(AES_NONCELEN);
+                        *aeschannel_locked = vec;
+
+                        let mut hasher_ecb = Blake2s::new();
+                        hasher_ecb.update(channel_clone.clone());
+                        let mut hasher_ecb_final = Blake2s::new();
+                        hasher_ecb_final.update(hasher_ecb.finalize().as_slice());
+                        let mut vec: Vec<u8> = hasher_ecb_final.finalize().as_slice().to_vec();
+                        vec.truncate(AES_NONCELEN);
+                        *aesecb_locked = vec;
+
+                        let cipher = Aes128Ecb::new_var(&*aesecb_locked, Default::default()).unwrap();
+                        let cuid = cipher.encrypt_vec(&uid_clone.into_bytes());
+                        let cipher = Aes128Ecb::new_var(&*aesecb_locked, Default::default()).unwrap();
+                        let cchannel = cipher.encrypt_vec(&channel_clone.into_bytes());
+
+                        //create hash for verification
+                        keys.push(b64encode(&cuid));
+                        keys.push(b64encode(&cchannel));
+                        key = Some(MsgHdr::do_hash(&keys));
+                        cid = Some(MsgHdr::select_cid(key.unwrap()));
+                        cid_val = cid.unwrap();
+                        println!("Adding TLS client with cid {:x}", cid_val);
+
+                        //save hash
+                        let mut keymap = keymap_inner.lock().unwrap();
+                        keymap.insert(channel_name, (key.unwrap(), cid.unwrap()));
+                    }
+
+                    // handle message
+                    let aeschannel_locked = aeschannel.lock().unwrap();
+                    let aeskey = GenericArray::from_slice(&*aeschannel_locked);
+                    let aesecb_locked = aesecb.lock().unwrap();
+                    let aesecbkey = &*aesecb_locked;
+
+                    let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
+                    let cuid = cipher.encrypt_vec(&uid.clone().into_bytes());
+                    let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
+                    let cchannel = cipher.encrypt_vec(&channel.clone().into_bytes());
+
+                    decoded_message = decoded_message.set_uid(b64encode(&cuid));
+                    decoded_message = decoded_message.set_channel(b64encode(&cchannel));
+
+                    let msg: &mut Vec<u8> = decoded_message.get_mut_message();
+                    let mut aesnonce = Vec::with_capacity(AES_NONCELEN);
+                    aesnonce.extend_from_slice(&msg[0..AES_NONCELEN]);
+                    let nonce = GenericArray::from_slice(&aesnonce);
+
+                    // create cipher instance
+                    let mut cipher = Aes128Ctr::new(&aeskey, &nonce);
+                    // apply keystream (encrypt)
+                    cipher.apply_keystream(&mut msg[AES_NONCELEN..]);
+
+                    let cbuf = decoded_message.encode();
+
+                    let msghdr = MsgHdr::new(cbuf.len() as u32, cid.unwrap(), key.unwrap());
+                    let mut msgv = msghdr.encode();
+                    msgv.extend(cbuf);
+
+                    // send the message
+                    let _ = tcp_sink.start_send(msgv)
+                        .map_err(|err| Error::new(ErrorKind::Other, err));
+                    let _ = tcp_sink.poll_complete()
+                        .map_err(|err| Error::new(ErrorKind::Other, err));
+
+                    // arrange proxy task
+                    let write_tcp = tcp_sink_rx.for_each(move |buf| {
+                        // send tcp stream
+                        let _ = tcp_sink.start_send(buf)
+                            .map_err(|err| Error::new(ErrorKind::Other, err));
+                        let _ = tcp_sink.poll_complete()
+                            .map_err(|err| Error::new(ErrorKind::Other, err));
+                        Ok(())
+                    })
+                    .map_err(|err|{println!("Got error {:#?} to write_tcp!", err); ()});
+
+                    let write_wstx = tcp_stream.for_each(move |buf| {
+                        // send to websocket
+                        let _ = ws_tx.start_send(buf.to_vec())
+                            .map_err(|err| Error::new(ErrorKind::Other, err));
+                        let _ = ws_tx.poll_complete()
+                            .map_err(|err| Error::new(ErrorKind::Other, err));
+                        Ok(())
+                    })
+                    .map_err(|err|{println!("Got error {:#?} to write_wstx!", err); ()});
+
+                    write_tcp
+                        .map(|_| ())
+                        .select(write_wstx.map(|_| ()))
+                        .then(|_| Ok(()))
+                })
+            .map_err(move |err| { println!("Got error {:#?} to client", err);});
+            tokio::spawn(client);
+        }
+        Ok(())
+    });
+
     let ws_writer = combined_rx.fold(sink, move |mut sink, msg| {
         let _ = sink
             .start_send(msg)
@@ -675,7 +774,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
     let connection = conn_with_task_and_tcp 
         .map(|_| ())
         .map_err(|_| ())
-        .select(client.map(|_| ()).map_err(|_| ()))
+        .select(send_wsrx.map(|_| ()).map_err(|_| ()))
         .then(|_| Ok(()));
     connection
 }
