@@ -537,13 +537,14 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                          .map_err(|err| Error::new(ErrorKind::Other, err));
                      let _ = tcp_sink_tx.poll_complete()
                          .map_err(|err| Error::new(ErrorKind::Other, err));
+                     let _ = tcp_sink_tx.close();
                  }
              }
              let mut channel_map = channel_map_inner.lock().unwrap();
              for chan in &chanvec {
                  let _ = channel_map.remove(chan);
              }
-             return Ok(());
+             return Err(Error::new(ErrorKind::BrokenPipe, "Keepalive timeout"));
         }
         let mut decoded_message = Msg::decode(buf.as_slice());
 
@@ -717,6 +718,9 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                     // arrange proxy task
                     let write_tcp = tcp_sink_rx.for_each(move |buf| {
                         // send tcp stream
+                        if buf.is_empty() {
+                           let _ = tcp_sink.close();
+                        }
                         let _ = tcp_sink.start_send(buf)
                             .map_err(|err| Error::new(ErrorKind::Other, err));
                         let _ = tcp_sink.poll_complete()
