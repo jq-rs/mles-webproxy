@@ -2,7 +2,7 @@
 
 `mles-webproxy` is an Mles WebSocket proxy service for [Mles](https://github.com/jq-rs/mles-rs) WebSocket protocols, like [MlesTalk](https://mles.io/app.html). It receives traffic over TLS and forwards it transformed to AES towards Mles server (and vice versa).
 
-For crates.io-version, please check [crates.io-branch]().
+For crates.io-version, please check [crates.io-branch](https://github.com/jq-rs/mles-webproxy/blob/jq-rs/crates.io/README.md).
 
 ## Example how to create your own personal proxy server
 
