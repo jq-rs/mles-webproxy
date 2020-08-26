@@ -4,6 +4,14 @@ version = "0.8.2"
 authors = ["jq-rs"]
 edition = "2018"
 
+description = "Mles WebProxy - an Mles WebSocket proxy and a static WWW-server based on Warp"
+license = "MPL-2.0"
+repository = "https://github.com/jq-rs/mles-webproxy"
+documentation = "https://mles.io"
+readme = "../README.md"
+categories = ["network-programming"]
+keywords = ["websocket", "proxy", "www", "server", "mles"]
+
 [dependencies]
 tokio = "0.1"
 futures = "0.1"
