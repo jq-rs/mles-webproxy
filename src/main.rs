@@ -514,7 +514,6 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
     });
 
     let mles_rx = mles_rx.map_err(|_| panic!("Mles rx just got an error")); //no errors on RX 
-
     let keyval_inner = keyval.clone();
     let keyaddr_inner = keyaddr.clone();
     let ws_tx_inner = ws_tx.clone();
@@ -525,26 +524,10 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
     let aeschannel_inner = aeschannel.clone();
     let aesecb_inner = aesecb.clone();
     let send_wsrx = mles_rx.for_each(move |buf| {
-         if buf.is_empty() {
-             let mut chanvec = Vec::new();
-             {
-                 let channel_map = channel_map_inner.lock().unwrap();
-                 let mut keymap_inner = keymap.lock().unwrap();
-                 for (channel, mut tcp_sink_tx) in channel_map.iter() {
-                     let _ = keymap_inner.remove(channel);
-                     chanvec.push(channel.clone());
-                     let _ = tcp_sink_tx.start_send(buf.clone())
-                         .map_err(|err| Error::new(ErrorKind::Other, err));
-                     let _ = tcp_sink_tx.poll_complete()
-                         .map_err(|err| Error::new(ErrorKind::Other, err));
-                     let _ = tcp_sink_tx.close();
-                 }
-             }
-             let mut channel_map = channel_map_inner.lock().unwrap();
-             for chan in &chanvec {
-                 let _ = channel_map.remove(chan);
-             }
-             return Err(Error::new(ErrorKind::BrokenPipe, "Keepalive timeout"));
+        if buf.is_empty() {
+            /* This will gracefully close all connections
+             * as they go out of scope */
+            return Err(Error::new(ErrorKind::BrokenPipe, "Keepalive timeout"));
         }
         let mut decoded_message = Msg::decode(buf.as_slice());
 
@@ -718,9 +701,6 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                     // arrange proxy task
                     let write_tcp = tcp_sink_rx.for_each(move |buf| {
                         // send tcp stream
-                        if buf.is_empty() {
-                           let _ = tcp_sink.close();
-                        }
                         let _ = tcp_sink.start_send(buf)
                             .map_err(|err| Error::new(ErrorKind::Other, err));
                         let _ = tcp_sink.poll_complete()
