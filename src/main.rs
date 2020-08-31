@@ -546,6 +546,11 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
         let mut channel_map = channel_map_inner.lock().unwrap();
         if let Some(mut tcp_sink_tx) = channel_map.get(&channel) {
             let aeschannel_locked = aeschannel_inner.lock().unwrap();
+            if aeschannel_locked.is_empty() {
+                //drop unlucky as not yet fully initialized TODO FIXME
+                println!("Dropped too early frame..");
+                return Ok(());
+            }
             let aeskey = GenericArray::from_slice(&*aeschannel_locked);
             let aesecb_locked = aesecb_inner.lock().unwrap();
             let aesecbkey = &*aesecb_locked;
