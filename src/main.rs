@@ -387,11 +387,6 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
     let aeschannel = Arc::new(Mutex::new(Vec::new()));
     let aesecb = Arc::new(Mutex::new(Vec::new()));
 
-
-    //let mut cid: Option<u32> = None;
-    //let mut key: Option<u64> = None;
-    //let mut cid_val = 0;
-
     let channel_map: Arc<Mutex<HashMap<String, UnboundedSender<_>>>> = Arc::new(Mutex::new(HashMap::new()));
 
     let (ws_tx, ws_rx) = unbounded();
