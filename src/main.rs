@@ -4,47 +4,44 @@
  *
  *  Copyright (C) 2020  Mles developers
  */
-use warp::{path, Filter, Future, Stream};
-use warp::filters::ws::Message;
 use futures::sync::oneshot;
 use std::thread;
+use warp::filters::ws::Message;
+use warp::{path, Filter, Future, Stream};
 
-use futures::Sink;
+use bytes::BytesMut;
+use core::sync::atomic::{AtomicUsize, Ordering};
 use futures::sync::mpsc::unbounded;
 use futures::sync::mpsc::UnboundedSender;
+use futures::Sink;
+use std::io::{self};
 use std::io::{Error, ErrorKind};
 use std::net::SocketAddr;
-use bytes::BytesMut;
-use tokio::net::TcpStream;
-use tokio_io::codec::Decoder;
-use std::{env, process};
-use std::io::{self};
-use tokio_io::codec::{Encoder as TokioEncoder, Decoder as TokioDecoder};
-use core::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::{env, process};
+use tokio::net::TcpStream;
+use tokio_io::codec::Decoder;
+use tokio_io::codec::{Decoder as TokioDecoder, Encoder as TokioEncoder};
 
 use std::collections::HashMap;
 use std::str::FromStr;
 
-use blake2::{Blake2s, Digest};
 use aes::block_cipher::generic_array::GenericArray;
-use block_modes::{BlockMode, Ecb};
-use block_modes::block_padding::Pkcs7;
 use aes::Aes128;
+use blake2::{Blake2s, Digest};
+use block_modes::block_padding::Pkcs7;
+use block_modes::{BlockMode, Ecb};
 type Aes128Ecb = Ecb<Aes128, Pkcs7>;
 
-use base64::{encode as b64encode, decode as b64decode};
+use base64::{decode as b64decode, encode as b64encode};
 
+use aes_ctr::stream_cipher::{NewStreamCipher, SyncStreamCipher};
 use aes_ctr::Aes128Ctr;
-use aes_ctr::stream_cipher::{
-    NewStreamCipher, SyncStreamCipher
-};
 
-
-use tokio::timer::Interval;
-use std::time::Duration;
 use mles_utils::*;
+use std::time::Duration;
+use tokio::timer::Interval;
 
 const KEEPALIVE: u64 = 5;
 const ACCEPTED_PROTOCOL: &str = "mles-websocket";
@@ -84,24 +81,19 @@ fn main() {
             srv_addr = item.clone();
         }
     }
-    
-    if 0 == srv_addr.len() {
+
+    if srv_addr.is_empty() {
         srv_addr = SRV_ADDR.to_string();
         println!("Mles server: {} (mles.io:8077)", srv_addr);
-    }
-    else {
-      if let Err(_) = srv_addr.parse::<SocketAddr>() {
-           println!("{}", USAGE);
-           process::exit(1);
-      }
+    } else if srv_addr.parse::<SocketAddr>().is_err() {
+        println!("{}", USAGE);
+        process::exit(1);
     }
 
-    if www_root_dir.len() == 0 ||
-       email.len() == 0 ||
-       domain.len() == 0 {
-           println!("{}", USAGE);
-           process::exit(1);
-       }
+    if www_root_dir.is_empty() || email.is_empty() || domain.is_empty() {
+        println!("{}", USAGE);
+        process::exit(1);
+    }
 
     let pem_name = format!("{}.pem", domain);
     let key_name = format!("{}.key", domain);
@@ -109,8 +101,12 @@ fn main() {
     loop {
         let res = request_cert(&domain, &email, &pem_name, &key_name);
         match res {
-            Err(err) => { println!("Cert err: {}", err); },
-            Ok(_) => { println!("Cert ok!"); }
+            Err(err) => {
+                println!("Cert err: {}", err);
+            }
+            Ok(_) => {
+                println!("Cert ok!");
+            }
         }
 
         // Now we have working keys, let us use them!
@@ -120,18 +116,13 @@ fn main() {
             let domain = domain.clone();
             let redirect = warp::path::tail().map(move |path: warp::path::Tail| {
                 warp::redirect::redirect(
-                    warp::http::Uri::from_str(&format!(
-                            "https://{}/{}",
-                            &domain,
-                            path.as_str()
-                            ))
-                    .expect("problem with uri?"),
-                    )
-
+                    warp::http::Uri::from_str(&format!("https://{}/{}", &domain, path.as_str()))
+                        .expect("problem with uri?"),
+                )
             });
-            let (_, server) = warp::serve(redirect)
-                .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
-            thread::spawn( || {
+            let (_, server) =
+                warp::serve(redirect).bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
+            thread::spawn(|| {
                 tokio::run(server);
             });
         }
@@ -142,14 +133,20 @@ fn main() {
             /* Run port 443 service */
             println!("Running TLS service on port 443");
             let index = warp::fs::dir(www_root_inner);
-            let ws = warp::ws2().and(warp::header::exact("Sec-WebSocket-Protocol", ACCEPTED_PROTOCOL))
+            let ws = warp::ws2()
+                .and(warp::header::exact(
+                    "Sec-WebSocket-Protocol",
+                    ACCEPTED_PROTOCOL,
+                ))
                 .map(move |ws: warp::ws::Ws2| {
                     let srv_addr = srv_addr_inner.clone();
                     // And then our closure will be called when it completes...
-                    ws.on_upgrade(move |websocket| {
-                        run_websocket_proxy(websocket, &srv_addr)
-                    })
-                }).with(warp::reply::with::header("Sec-WebSocket-Protocol", "mles-websocket"));
+                    ws.on_upgrade(move |websocket| run_websocket_proxy(websocket, &srv_addr))
+                })
+                .with(warp::reply::with::header(
+                    "Sec-WebSocket-Protocol",
+                    "mles-websocket",
+                ));
 
             let tlsroutes = ws.or(index);
 
@@ -166,8 +163,7 @@ fn main() {
         if expire > AMONTH {
             println!("Waiting for {:#?} before renewing", expire - AMONTH);
             thread::sleep(expire - AMONTH);
-        }
-        else {
+        } else {
             println!("Waiting for {:#?} before renewing", ADAY);
             thread::sleep(ADAY);
         }
@@ -176,7 +172,6 @@ fn main() {
         tx.send(()).unwrap();
         thread::sleep(Duration::from_secs(1));
     }
-
 }
 
 struct Bytes;
@@ -189,7 +184,7 @@ impl TokioDecoder for Bytes {
         if buf.len() >= MsgHdr::get_hdrkey_len() {
             let msghdr = MsgHdr::decode(buf.to_vec());
             // HDRKEYL is header min size
-            if msghdr.get_type() != 'M' as u8 {
+            if msghdr.get_type() != b'M' {
                 let len = buf.len();
                 buf.split_to(len);
                 return Ok(None);
@@ -232,16 +227,20 @@ impl TokioEncoder for Bytes {
 fn expire_time(pem_name: &str) -> Duration {
     if let Some(time_to_renew) = time_to_expiration(&pem_name) {
         return time_to_renew;
-    } 
+    }
     ADAY
 }
 
-
-fn request_cert(domain: &str, email: &str, pem_name: &str, key_name: &str) -> Result<(), acme_lib::Error> {
+fn request_cert(
+    domain: &str,
+    email: &str,
+    pem_name: &str,
+    key_name: &str,
+) -> Result<(), acme_lib::Error> {
     let cert_time = expire_time(pem_name);
 
     println!("Time to expire {:#?}", cert_time);
-        
+
     if AMONTH > cert_time {
         println!("Less than month, renewing..");
 
@@ -305,18 +304,14 @@ fn request_cert(domain: &str, email: &str, pem_name: &str, key_name: &str) -> Re
                 .map(move || proof.clone());
             let redirect = warp::path::tail().map(move |path: warp::path::Tail| {
                 warp::redirect::redirect(
-                    warp::http::Uri::from_str(&format!(
-                            "https://{}/{}",
-                            &domain,
-                            path.as_str()
-                            ))
-                    .expect("problem with uri?"),
-                    )
+                    warp::http::Uri::from_str(&format!("https://{}/{}", &domain, path.as_str()))
+                        .expect("problem with uri?"),
+                )
             });
             let (tx80, rx80) = oneshot::channel();
             let (_, server) = warp::serve(token.or(redirect))
                 .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
-            thread::spawn( || {
+            thread::spawn(|| {
                 tokio::run(server);
             });
             // After the file is accessible from the web, the calls
@@ -342,8 +337,7 @@ fn request_cert(domain: &str, email: &str, pem_name: &str, key_name: &str) -> Re
         // Submit the CSR. This causes the ACME provider to enter a state
         // of "processing" that must be polled until the certificate is
         // either issued or rejected. Again we poll for the status change.
-        let ord_cert =
-            ord_csr.finalize_pkey(pkey_pri, 5000)?;
+        let ord_cert = ord_csr.finalize_pkey(pkey_pri, 5000)?;
 
         // Now download the certificate. Also stores the cert in the
         // persistence.
@@ -366,9 +360,10 @@ fn time_to_expiration<P: AsRef<std::path::Path>>(p: P) -> Option<std::time::Dura
         .time_to_expiration()
 }
 
-
-
-fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl Future<Item = (), Error = ()> + Send + 'static {
+fn run_websocket_proxy(
+    websocket: warp::ws::WebSocket,
+    srv_addr: &str,
+) -> impl Future<Item = (), Error = ()> + Send + 'static {
     let raddr = srv_addr.parse::<SocketAddr>().unwrap(); //already checked
 
     let keyval = match env::var("MLES_KEY") {
@@ -387,7 +382,8 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
     let aeschannel = Arc::new(Mutex::new(Vec::new()));
     let aesecb = Arc::new(Mutex::new(Vec::new()));
 
-    let channel_map: Arc<Mutex<HashMap<String, UnboundedSender<_>>>> = Arc::new(Mutex::new(HashMap::new()));
+    let channel_map: Arc<Mutex<HashMap<String, UnboundedSender<_>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
     let (ws_tx, ws_rx) = unbounded();
     let (mut mles_tx, mles_rx) = unbounded();
@@ -398,33 +394,37 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
     let when = Duration::from_millis(12000);
     let task = Interval::new_interval(when);
 
-    let ping_cntr_inner = ping_cntr.clone();
+    let ping_cntr_inner = ping_cntr;
     let pong_cntr_inner = pong_cntr.clone();
     let mut mles_tx_inner = mles_tx.clone();
     let mut combined_tx_inner = combined_tx.clone();
-    let task = task.for_each(move |_| {
-        let prev_ping_cnt = ping_cntr_inner.fetch_add(1, Ordering::Relaxed);
-        let pong_cnt = pong_cntr_inner.load(Ordering::Relaxed);
-        if pong_cnt + 1 < prev_ping_cnt {
-            println!("Dropping inactive TLS connection..");
-            let _ = mles_tx_inner.start_send(Vec::new())
+    let task = task
+        .for_each(move |_| {
+            let prev_ping_cnt = ping_cntr_inner.fetch_add(1, Ordering::Relaxed);
+            let pong_cnt = pong_cntr_inner.load(Ordering::Relaxed);
+            if pong_cnt + 1 < prev_ping_cnt {
+                println!("Dropping inactive TLS connection..");
+                let _ = mles_tx_inner
+                    .start_send(Vec::new())
+                    .map_err(|err| Error::new(ErrorKind::Other, err));
+                let _ = mles_tx_inner
+                    .poll_complete()
+                    .map_err(|err| Error::new(ErrorKind::Other, err));
+            }
+            let _ = combined_tx_inner
+                .start_send(Message::ping(Vec::new()))
                 .map_err(|err| Error::new(ErrorKind::Other, err));
-            let _ = mles_tx_inner.poll_complete()
+            let _ = combined_tx_inner
+                .poll_complete()
                 .map_err(|err| Error::new(ErrorKind::Other, err));
-        }
-        let _  = combined_tx_inner.start_send(Message::ping(Vec::new()))
-            .map_err(|err| Error::new(ErrorKind::Other, err));
-        let _ = combined_tx_inner.poll_complete()
-            .map_err(|err| Error::new(ErrorKind::Other, err));
-        Ok(())
-    })
-    .map_err(|e| panic!("delay errored; err={:?}", e));
+            Ok(())
+        })
+        .map_err(|e| panic!("delay errored; err={:?}", e));
 
     let ws_reader = stream.for_each(move |message: Message| {
         if message.is_pong() {
             let _ = pong_cntr.fetch_add(1, Ordering::Relaxed);
-        }
-        else {
+        } else {
             let mles_message = message.into_bytes();
             let _ = mles_tx
                 .start_send(mles_message)
@@ -445,7 +445,8 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
         let channel = decoded_message.get_channel();
         let uid = decoded_message.get_uid();
 
-        if 0 == channel.len() || 0 == uid.len() || decoded_message.get_message_len() <= AES_NONCELEN {
+        if channel.is_empty() || uid.is_empty() || decoded_message.get_message_len() <= AES_NONCELEN
+        {
             /* Just drop handling */
             return Ok(());
         }
@@ -461,37 +462,31 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
             let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
             if let Ok(uid) = cipher.decrypt_vec(&uid) {
                 duid = uid;
-            }
-            else {
+            } else {
                 return Ok(());
             }
-        }
-        else {
+        } else {
             return Ok(());
         }
         if let Ok(channel) = b64decode(channel) {
             let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
             if let Ok(channel) = cipher.decrypt_vec(&channel) {
                 dchannel = channel;
-            }
-            else {
+            } else {
                 return Ok(());
             }
-        }
-        else {
+        } else {
             return Ok(());
         }
-       
+
         if let Ok(duid) = String::from_utf8(duid) {
             decoded_message = decoded_message.set_uid(duid);
-        }
-        else {
+        } else {
             return Ok(());
         }
         if let Ok(dchannel) = String::from_utf8(dchannel) {
             decoded_message = decoded_message.set_channel(dchannel);
-        }
-        else {
+        } else {
             return Ok(());
         }
 
@@ -517,16 +512,16 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
         Ok(())
     });
 
-    let mles_rx = mles_rx.map_err(|_| panic!("Mles rx just got an error")); //no errors on RX 
-    let keyval_inner = keyval.clone();
-    let keyaddr_inner = keyaddr.clone();
-    let ws_tx_inner = ws_tx.clone();
+    let mles_rx = mles_rx.map_err(|_| panic!("Mles rx just got an error")); //no errors on RX
+    let keyval_inner = keyval;
+    let keyaddr_inner = keyaddr;
+    let ws_tx_inner = ws_tx;
 
     let keymap: Arc<Mutex<HashMap<String, (u64, u32)>>> = Arc::new(Mutex::new(HashMap::new()));
 
-    let channel_map_inner = channel_map.clone();
-    let aeschannel_inner = aeschannel.clone();
-    let aesecb_inner = aesecb.clone();
+    let channel_map_inner = channel_map;
+    let aeschannel_inner = aeschannel;
+    let aesecb_inner = aesecb;
     let send_wsrx = mles_rx.for_each(move |buf| {
         if buf.is_empty() {
             /* This will gracefully close all connections
@@ -536,10 +531,11 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
         let mut decoded_message = Msg::decode(buf.as_slice());
 
         /* Check sanity */
-        let channel  = decoded_message.get_channel();
+        let channel = decoded_message.get_channel();
         let uid = decoded_message.get_uid();
 
-        if 0 == channel.len() || 0 == uid.len() || decoded_message.get_message_len() <= AES_NONCELEN {
+        if channel.is_empty() || uid.is_empty() || decoded_message.get_message_len() <= AES_NONCELEN
+        {
             return Ok(());
         }
 
@@ -560,7 +556,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
             let aesecbkey = &*aesecb_locked;
 
             let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
-            let cuid = cipher.encrypt_vec(&uid.clone().into_bytes());
+            let cuid = cipher.encrypt_vec(&uid.into_bytes());
             let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
             let cchannel = cipher.encrypt_vec(&channel.clone().into_bytes());
 
@@ -584,13 +580,14 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                 let msghdr = MsgHdr::new(cbuf.len() as u32, *cid, *key);
                 let mut msgv = msghdr.encode();
                 msgv.extend(cbuf);
-                let _ = tcp_sink_tx.start_send(msgv)
+                let _ = tcp_sink_tx
+                    .start_send(msgv)
                     .map_err(|err| Error::new(ErrorKind::Other, err));
-                let _ = tcp_sink_tx.poll_complete()
+                let _ = tcp_sink_tx
+                    .poll_complete()
                     .map_err(|err| Error::new(ErrorKind::Other, err));
             }
-        }
-        else {
+        } else {
             let (tcp_sink_tx, tcp_sink_rx) = unbounded();
             let keyval = keyval_inner.clone();
             let keyaddr = keyaddr_inner.clone();
@@ -599,7 +596,7 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
             let aesecb = aesecb_inner.clone();
 
             //insert this channel to hashmap (can we do it this early?)
-            channel_map.insert(channel.clone(), tcp_sink_tx.clone());
+            channel_map.insert(channel.clone(), tcp_sink_tx);
 
             let tcp = TcpStream::connect(&raddr);
             let client = tcp
@@ -698,38 +695,52 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                     msgv.extend(cbuf);
 
                     // send the message
-                    let _ = tcp_sink.start_send(msgv)
+                    let _ = tcp_sink
+                        .start_send(msgv)
                         .map_err(|err| Error::new(ErrorKind::Other, err));
-                    let _ = tcp_sink.poll_complete()
+                    let _ = tcp_sink
+                        .poll_complete()
                         .map_err(|err| Error::new(ErrorKind::Other, err));
 
                     // arrange proxy task
-                    let write_tcp = tcp_sink_rx.for_each(move |buf| {
-                        // send tcp stream
-                        let _ = tcp_sink.start_send(buf)
-                            .map_err(|err| Error::new(ErrorKind::Other, err));
-                        let _ = tcp_sink.poll_complete()
-                            .map_err(|err| Error::new(ErrorKind::Other, err));
-                        Ok(())
-                    })
-                    .map_err(|err|{println!("Got error {:#?} to write_tcp!", err); ()});
+                    let write_tcp = tcp_sink_rx
+                        .for_each(move |buf| {
+                            // send tcp stream
+                            let _ = tcp_sink
+                                .start_send(buf)
+                                .map_err(|err| Error::new(ErrorKind::Other, err));
+                            let _ = tcp_sink
+                                .poll_complete()
+                                .map_err(|err| Error::new(ErrorKind::Other, err));
+                            Ok(())
+                        })
+                        .map_err(|err| {
+                            println!("Got error {:#?} to write_tcp!", err);
+                        });
 
-                    let write_wstx = tcp_stream.for_each(move |buf| {
-                        // send to websocket
-                        let _ = ws_tx.start_send(buf.to_vec())
-                            .map_err(|err| Error::new(ErrorKind::Other, err));
-                        let _ = ws_tx.poll_complete()
-                            .map_err(|err| Error::new(ErrorKind::Other, err));
-                        Ok(())
-                    })
-                    .map_err(|err|{println!("Got error {:#?} to write_wstx!", err); ()});
+                    let write_wstx = tcp_stream
+                        .for_each(move |buf| {
+                            // send to websocket
+                            let _ = ws_tx
+                                .start_send(buf.to_vec())
+                                .map_err(|err| Error::new(ErrorKind::Other, err));
+                            let _ = ws_tx
+                                .poll_complete()
+                                .map_err(|err| Error::new(ErrorKind::Other, err));
+                            Ok(())
+                        })
+                        .map_err(|err| {
+                            println!("Got error {:#?} to write_wstx!", err);
+                        });
 
                     write_tcp
                         .map(|_| ())
                         .select(write_wstx.map(|_| ()))
                         .then(|_| Ok(()))
                 })
-            .map_err(move |err| { println!("Got error {:#?} to client", err);});
+                .map_err(move |err| {
+                    println!("Got error {:#?} to client", err);
+                });
             tokio::spawn(client);
         }
         Ok(())
@@ -760,10 +771,9 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
         .map_err(|_| ())
         .select(tcp_to_ws_writer.map(|_| ()).map_err(|_| ()));
 
-    let connection = conn_with_task_and_tcp 
+    conn_with_task_and_tcp
         .map(|_| ())
         .map_err(|_| ())
         .select(send_wsrx.map(|_| ()).map_err(|_| ()))
-        .then(|_| Ok(()));
-    connection
+        .then(|_| Ok(()))
 }
