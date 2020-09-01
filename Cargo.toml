@@ -1,6 +1,6 @@
 [package]
 name = "mles-webproxy"
-version = "0.8.2"
+version = "0.8.3"
 authors = ["jq-rs"]
 edition = "2018"
 
@@ -8,7 +8,7 @@ edition = "2018"
 tokio = "0.1"
 futures = "0.1"
 acme-lib = "0.7"
-warp = { version = "0.1.21", features=["tls"] }
+warp = { version = "0.1.23", features=["tls"] }
 tokio-io = "0.1"
 mles-utils = "1.1.0"
 bytes = "0.4"

@@ -1,3 +1,9 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ *
+ *  Copyright (C) 2020  Mles developers
+ */
 use warp::{path, Filter, Future, Stream};
 use warp::filters::ws::Message;
 use futures::sync::oneshot;
@@ -112,14 +118,17 @@ fn main() {
         {
             // First start the redirecting from port 80 to port 443.
             let domain = domain.clone();
-            let redirect = 
-                warp::any().map(move || {
-                    warp::redirect(warp::http::Uri::from_str(&format!(
-                            "https://{}",
-                            &domain
-                            )).expect("problem with uri?"))
-                });
+            let redirect = warp::path::tail().map(move |path: warp::path::Tail| {
+                warp::redirect::redirect(
+                    warp::http::Uri::from_str(&format!(
+                            "https://{}/{}",
+                            &domain,
+                            path.as_str()
+                            ))
+                    .expect("problem with uri?"),
+                    )
 
+            });
             let (_, server) = warp::serve(redirect)
                 .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
             thread::spawn( || {
@@ -379,9 +388,9 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
     let aesecb = Arc::new(Mutex::new(Vec::new()));
 
 
-    let mut cid: Option<u32> = None;
-    let mut key: Option<u64> = None;
-    let mut cid_val = 0;
+    //let mut cid: Option<u32> = None;
+    //let mut key: Option<u64> = None;
+    //let mut cid_val = 0;
 
     let channel_map: Arc<Mutex<HashMap<String, UnboundedSender<_>>>> = Arc::new(Mutex::new(HashMap::new()));
 
@@ -628,49 +637,45 @@ fn run_websocket_proxy(websocket: warp::ws::WebSocket, srv_addr: &str) -> impl F
                     }
                     let (mut tcp_sink, tcp_stream) = Bytes.framed(stream).split();
 
-                    {
-                        // create keys
-                        let channel_clone = channel.clone();
-                        let uid_clone = uid.clone();
-                        let mut aeschannel_locked = aeschannel.lock().unwrap();
-                        let mut aesecb_locked = aesecb.lock().unwrap();
+                    let mut aeschannel_locked = aeschannel.lock().unwrap();
+                    let mut aesecb_locked = aesecb.lock().unwrap();
+                    // create keys
+                    let channel_clone = channel.clone();
+                    let uid_clone = uid.clone();
 
-                        let mut hasher = Blake2s::new();
-                        hasher.update(channel_clone.clone());
-                        let mut vec: Vec<u8> = hasher.finalize().as_slice().to_vec();
-                        vec.truncate(AES_NONCELEN);
-                        *aeschannel_locked = vec;
+                    let mut hasher = Blake2s::new();
+                    hasher.update(channel_clone.clone());
+                    let mut vec: Vec<u8> = hasher.finalize().as_slice().to_vec();
+                    vec.truncate(AES_NONCELEN);
+                    *aeschannel_locked = vec;
 
-                        let mut hasher_ecb = Blake2s::new();
-                        hasher_ecb.update(channel_clone.clone());
-                        let mut hasher_ecb_final = Blake2s::new();
-                        hasher_ecb_final.update(hasher_ecb.finalize().as_slice());
-                        let mut vec: Vec<u8> = hasher_ecb_final.finalize().as_slice().to_vec();
-                        vec.truncate(AES_NONCELEN);
-                        *aesecb_locked = vec;
+                    let mut hasher_ecb = Blake2s::new();
+                    hasher_ecb.update(channel_clone.clone());
+                    let mut hasher_ecb_final = Blake2s::new();
+                    hasher_ecb_final.update(hasher_ecb.finalize().as_slice());
+                    let mut vec: Vec<u8> = hasher_ecb_final.finalize().as_slice().to_vec();
+                    vec.truncate(AES_NONCELEN);
+                    *aesecb_locked = vec;
 
-                        let cipher = Aes128Ecb::new_var(&*aesecb_locked, Default::default()).unwrap();
-                        let cuid = cipher.encrypt_vec(&uid_clone.into_bytes());
-                        let cipher = Aes128Ecb::new_var(&*aesecb_locked, Default::default()).unwrap();
-                        let cchannel = cipher.encrypt_vec(&channel_clone.into_bytes());
+                    let cipher = Aes128Ecb::new_var(&*aesecb_locked, Default::default()).unwrap();
+                    let cuid = cipher.encrypt_vec(&uid_clone.into_bytes());
+                    let cipher = Aes128Ecb::new_var(&*aesecb_locked, Default::default()).unwrap();
+                    let cchannel = cipher.encrypt_vec(&channel_clone.into_bytes());
 
-                        //create hash for verification
-                        keys.push(b64encode(&cuid));
-                        keys.push(b64encode(&cchannel));
-                        key = Some(MsgHdr::do_hash(&keys));
-                        cid = Some(MsgHdr::select_cid(key.unwrap()));
-                        cid_val = cid.unwrap();
-                        println!("Adding TLS client with cid {:x}", cid_val);
+                    //create hash for verification
+                    keys.push(b64encode(&cuid));
+                    keys.push(b64encode(&cchannel));
+                    let key = Some(MsgHdr::do_hash(&keys));
+                    let cid = Some(MsgHdr::select_cid(key.unwrap()));
+                    let cid_val = cid.unwrap();
+                    println!("Adding TLS client with cid {:x}", cid_val);
 
-                        //save hash
-                        let mut keymap = keymap_inner.lock().unwrap();
-                        keymap.insert(channel_name, (key.unwrap(), cid.unwrap()));
-                    }
+                    //save hash
+                    let mut keymap = keymap_inner.lock().unwrap();
+                    keymap.insert(channel_name, (key.unwrap(), cid.unwrap()));
 
                     // handle message
-                    let aeschannel_locked = aeschannel.lock().unwrap();
                     let aeskey = GenericArray::from_slice(&*aeschannel_locked);
-                    let aesecb_locked = aesecb.lock().unwrap();
                     let aesecbkey = &*aesecb_locked;
 
                     let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
