@@ -379,8 +379,7 @@ fn run_websocket_proxy(
     let ping_cntr = Arc::new(AtomicUsize::new(0));
     let pong_cntr = Arc::new(AtomicUsize::new(0));
 
-    let aeschannel = Arc::new(Mutex::new(Vec::new()));
-    let aesecb = Arc::new(Mutex::new(Vec::new()));
+    let aeschannel_ecb = Arc::new(Mutex::new((Vec::new(), Vec::new())));
 
     let channel_map: Arc<Mutex<HashMap<String, UnboundedSender<_>>>> =
         Arc::new(Mutex::new(HashMap::new()));
@@ -436,8 +435,7 @@ fn run_websocket_proxy(
         Ok(())
     });
 
-    let aeschannel_inner = aeschannel.clone();
-    let aesecb_inner = aesecb.clone();
+    let aeschannel_ecb_inner = aeschannel_ecb.clone();
     let tcp_to_ws_writer = ws_rx.for_each(move |buf: Vec<_>| {
         let mut decoded_message = Msg::decode(&buf);
 
@@ -451,15 +449,14 @@ fn run_websocket_proxy(
             return Ok(());
         }
 
-        let aeschannel_locked = aeschannel_inner.lock().unwrap();
-        let aeskey = GenericArray::from_slice(&*aeschannel_locked);
-        let aesecb_locked = aesecb_inner.lock().unwrap();
-        let aesecbkey = &*aesecb_locked;
+        let aeschannel_ecb_locked = aeschannel_ecb_inner.lock().unwrap();
+        let aeskey = GenericArray::from_slice(&aeschannel_ecb_locked.0);
+        let aesecbkey = &aeschannel_ecb_locked.1;
 
         let duid;
         let dchannel;
         if let Ok(uid) = b64decode(uid) {
-            let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
+            let cipher = Aes128Ecb::new_var(aesecbkey, Default::default()).unwrap();
             if let Ok(uid) = cipher.decrypt_vec(&uid) {
                 duid = uid;
             } else {
@@ -469,7 +466,7 @@ fn run_websocket_proxy(
             return Ok(());
         }
         if let Ok(channel) = b64decode(channel) {
-            let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
+            let cipher = Aes128Ecb::new_var(aesecbkey, Default::default()).unwrap();
             if let Ok(channel) = cipher.decrypt_vec(&channel) {
                 dchannel = channel;
             } else {
@@ -520,8 +517,7 @@ fn run_websocket_proxy(
     let keymap: Arc<Mutex<HashMap<String, (u64, u32)>>> = Arc::new(Mutex::new(HashMap::new()));
 
     let channel_map_inner = channel_map;
-    let aeschannel_inner = aeschannel;
-    let aesecb_inner = aesecb;
+    let aeschannel_ecb_inner = aeschannel_ecb;
     let send_wsrx = mles_rx.for_each(move |buf| {
         if buf.is_empty() {
             /* This will gracefully close all connections
@@ -545,15 +541,14 @@ fn run_websocket_proxy(
 
         let mut channel_map = channel_map_inner.lock().unwrap();
         if let Some(mut tcp_sink_tx) = channel_map.get(&channel) {
-            let aeschannel_locked = aeschannel_inner.lock().unwrap();
-            if aeschannel_locked.is_empty() {
+            let aeschannel_ecb_locked = aeschannel_ecb_inner.lock().unwrap();
+            if aeschannel_ecb_locked.0.is_empty() {
                 //drop unlucky as not yet fully initialized TODO FIXME
                 println!("Dropped too early frame..");
                 return Ok(());
             }
-            let aeskey = GenericArray::from_slice(&*aeschannel_locked);
-            let aesecb_locked = aesecb_inner.lock().unwrap();
-            let aesecbkey = &*aesecb_locked;
+            let aeskey = GenericArray::from_slice(&aeschannel_ecb_locked.0);
+            let aesecbkey = &aeschannel_ecb_locked.1;
 
             let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
             let cuid = cipher.encrypt_vec(&uid.into_bytes());
@@ -592,8 +587,7 @@ fn run_websocket_proxy(
             let keyval = keyval_inner.clone();
             let keyaddr = keyaddr_inner.clone();
             let mut ws_tx = ws_tx_inner.clone();
-            let aeschannel = aeschannel_inner.clone();
-            let aesecb = aesecb_inner.clone();
+            let aeschannel_ecb = aeschannel_ecb_inner.clone();
 
             //insert this channel to hashmap (can we do it this early?)
             channel_map.insert(channel.clone(), tcp_sink_tx);
@@ -629,29 +623,26 @@ fn run_websocket_proxy(
                     }
                     let (mut tcp_sink, tcp_stream) = Bytes.framed(stream).split();
 
-                    let mut aeschannel_locked = aeschannel.lock().unwrap();
-                    let mut aesecb_locked = aesecb.lock().unwrap();
+                    let mut aeschannel_ecb_locked = aeschannel_ecb.lock().unwrap();
                     // create keys
                     let channel_clone = channel.clone();
                     let uid_clone = uid.clone();
 
                     let mut hasher = Blake2s::new();
                     hasher.update(channel_clone.clone());
-                    let mut vec: Vec<u8> = hasher.finalize().as_slice().to_vec();
-                    vec.truncate(AES_NONCELEN);
-                    *aeschannel_locked = vec;
+                    aeschannel_ecb_locked.0 = hasher.finalize().as_slice().to_vec();
+                    aeschannel_ecb_locked.0.truncate(AES_NONCELEN);
 
                     let mut hasher_ecb = Blake2s::new();
                     hasher_ecb.update(channel_clone.clone());
                     let mut hasher_ecb_final = Blake2s::new();
                     hasher_ecb_final.update(hasher_ecb.finalize().as_slice());
-                    let mut vec: Vec<u8> = hasher_ecb_final.finalize().as_slice().to_vec();
-                    vec.truncate(AES_NONCELEN);
-                    *aesecb_locked = vec;
+                    aeschannel_ecb_locked.1 = hasher_ecb_final.finalize().as_slice().to_vec();
+                    aeschannel_ecb_locked.1.truncate(AES_NONCELEN);
 
-                    let cipher = Aes128Ecb::new_var(&*aesecb_locked, Default::default()).unwrap();
+                    let cipher = Aes128Ecb::new_var(&aeschannel_ecb_locked.1, Default::default()).unwrap();
                     let cuid = cipher.encrypt_vec(&uid_clone.into_bytes());
-                    let cipher = Aes128Ecb::new_var(&*aesecb_locked, Default::default()).unwrap();
+                    let cipher = Aes128Ecb::new_var(&aeschannel_ecb_locked.1, Default::default()).unwrap();
                     let cchannel = cipher.encrypt_vec(&channel_clone.into_bytes());
 
                     //create hash for verification
@@ -667,8 +658,8 @@ fn run_websocket_proxy(
                     keymap.insert(channel_name, (key.unwrap(), cid.unwrap()));
 
                     // handle message
-                    let aeskey = GenericArray::from_slice(&*aeschannel_locked);
-                    let aesecbkey = &*aesecb_locked;
+                    let aeskey = GenericArray::from_slice(&aeschannel_ecb_locked.0);
+                    let aesecbkey = &aeschannel_ecb_locked.1;
 
                     let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
                     let cuid = cipher.encrypt_vec(&uid.clone().into_bytes());
