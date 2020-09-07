@@ -575,12 +575,14 @@ fn run_websocket_proxy(
                 let msghdr = MsgHdr::new(cbuf.len() as u32, *cid, *key);
                 let mut msgv = msghdr.encode();
                 msgv.extend(cbuf);
-                let _ = tcp_sink_tx
-                    .start_send(msgv)
-                    .map_err(|err| Error::new(ErrorKind::Other, err));
-                let _ = tcp_sink_tx
-                    .poll_complete()
-                    .map_err(|err| Error::new(ErrorKind::Other, err));
+                if let Err(_) = tcp_sink_tx
+                    .start_send(msgv) {
+                        return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
+                    };
+                if let Err(_) = tcp_sink_tx
+                    .poll_complete() {
+                        return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
+                    };
             }
             return Ok(());
         }
@@ -695,15 +697,17 @@ fn run_websocket_proxy(
                     .map_err(|err| Error::new(ErrorKind::Other, err));
 
                 // arrange proxy task
+                let tcp_sink_rx = tcp_sink_rx.map_err(|_| panic!("Sink rx just got an error")); //no errors on RX
                 let write_tcp = tcp_sink_rx
                     .for_each(move |buf| {
-                        // send tcp stream
-                        let _ = tcp_sink
-                            .start_send(buf)
-                            .map_err(|err| Error::new(ErrorKind::Other, err));
-                        let _ = tcp_sink
-                            .poll_complete()
-                            .map_err(|err| Error::new(ErrorKind::Other, err));
+                        if let Err(_) = tcp_sink
+                            .start_send(buf) {
+                                return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
+                            };
+                        if let Err(_) = tcp_sink
+                            .poll_complete() {
+                                return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
+                            };
                         Ok(())
                     })
                 .map_err(|err| {
@@ -713,12 +717,14 @@ fn run_websocket_proxy(
                 let write_wstx = tcp_stream
                     .for_each(move |buf| {
                         // send to websocket
-                        let _ = ws_tx
-                            .start_send(buf.to_vec())
-                            .map_err(|err| Error::new(ErrorKind::Other, err));
-                        let _ = ws_tx
-                            .poll_complete()
-                            .map_err(|err| Error::new(ErrorKind::Other, err));
+                        if let Err(_) = ws_tx
+                            .start_send(buf.to_vec()) {
+                                return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
+                            };
+                        if let Err(_) = ws_tx
+                            .poll_complete() {
+                                return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
+                            };
                         Ok(())
                     })
                 .map_err(|err| {
@@ -733,6 +739,7 @@ fn run_websocket_proxy(
         .map_err(move |err| {
             println!("Got error {:#?} to client", err);
         });
+
         tokio::spawn(client);
         Ok(())
     });
