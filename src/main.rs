@@ -385,7 +385,7 @@ fn run_websocket_proxy(
         Arc::new(Mutex::new(HashMap::new()));
 
     let (ws_tx, ws_rx) = unbounded();
-    let (mut mles_tx, mles_rx) = unbounded();
+    let (mles_tx, mles_rx) = unbounded();
     let (mut combined_tx, combined_rx) = unbounded();
 
     let (sink, stream) = websocket.split();
@@ -420,15 +420,16 @@ fn run_websocket_proxy(
         })
         .map_err(|e| panic!("delay errored; err={:?}", e));
 
+    let mut mles_tx_inner = mles_tx.clone();
     let ws_reader = stream.for_each(move |message: Message| {
         if message.is_pong() {
             let _ = pong_cntr.fetch_add(1, Ordering::Relaxed);
         } else {
             let mles_message = message.into_bytes();
-            let _ = mles_tx
+            let _ = mles_tx_inner
                 .start_send(mles_message)
                 .map_err(|err| Error::new(ErrorKind::Other, err));
-            let _ = mles_tx
+            let _ = mles_tx_inner
                 .poll_complete()
                 .map_err(|err| Error::new(ErrorKind::Other, err));
         }
@@ -518,6 +519,7 @@ fn run_websocket_proxy(
 
     let channel_map_inner = channel_map;
     let aeschannel_ecb_inner = aeschannel_ecb;
+    let mles_tx_inner = mles_tx.clone();
     let send_wsrx = mles_rx.for_each(move |buf| {
         if buf.is_empty() {
             /* This will gracefully close all connections
@@ -595,6 +597,7 @@ fn run_websocket_proxy(
         //insert this channel to hashmap (can we do it this early?)
         channel_map.insert(channel.clone(), tcp_sink_tx);
 
+        let mut mles_tx = mles_tx_inner.clone();
         let tcp = TcpStream::connect(&raddr);
         let client = tcp
             .and_then(move |stream| {
@@ -734,11 +737,19 @@ fn run_websocket_proxy(
                 write_tcp
                     .map(|_| ())
                     .select(write_wstx.map(|_| ()))
-                    .then(|_| Ok(()))
+                    .then(move |_| {
+                        if let Err(_) = mles_tx
+                            .start_send(Vec::new()) {
+                                return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
+                            };
+                        if let Err(_) = mles_tx
+                            .poll_complete() {
+                                return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
+                            };
+                        Ok(())
+                    })
             })
-        .map_err(move |err| {
-            println!("Got error {:#?} to client", err);
-        });
+        .map_err(|_| ());
 
         tokio::spawn(client);
         Ok(())
