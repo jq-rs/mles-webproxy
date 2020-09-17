@@ -4,15 +4,19 @@
  *
  *  Copyright (C) 2020  Mles developers
  */
-use futures::sync::oneshot;
+use futures::channel::oneshot;
+use futures::executor::block_on;
+use futures::StreamExt;
+use futures::TryFutureExt;
+use futures::FutureExt;
 use std::thread;
 use warp::filters::ws::Message;
 use warp::{path, Filter, Future, Stream};
 
 use bytes::BytesMut;
 use core::sync::atomic::{AtomicUsize, Ordering};
-use futures::sync::mpsc::unbounded;
-use futures::sync::mpsc::UnboundedSender;
+//use futures::sync::mpsc::unbounded;
+//use futures::sync::mpsc::UnboundedSender;
 use futures::Sink;
 use std::io::{self};
 use std::io::{Error, ErrorKind};
@@ -21,8 +25,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::{env, process};
 use tokio::net::TcpStream;
-use tokio_io::codec::Decoder;
-use tokio_io::codec::{Decoder as TokioDecoder, Encoder as TokioEncoder};
+//use tokio_io::codec::Decoder;
+use tokio_util::codec::{Decoder as TokioDecoder, Encoder as TokioEncoder};
 
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -39,9 +43,9 @@ use base64::{decode as b64decode, encode as b64encode};
 use aes_ctr::stream_cipher::{NewStreamCipher, SyncStreamCipher};
 use aes_ctr::Aes128Ctr;
 
-use mles_utils::*;
+//use mles_utils::*;
 use std::time::Duration;
-use tokio::timer::Interval;
+//use tokio::timer::Interval;
 
 const KEEPALIVE: u64 = 5;
 const ACCEPTED_PROTOCOL: &str = "mles-websocket";
@@ -99,6 +103,7 @@ fn main() {
     let key_name = format!("{}.key", domain);
 
     loop {
+
         let res = request_cert(&domain, &email, &pem_name, &key_name);
         match res {
             Err(err) => {
@@ -120,10 +125,10 @@ fn main() {
                         .expect("problem with uri?"),
                 )
             });
-            let (_, server) =
-                warp::serve(redirect).bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
             thread::spawn(|| {
-                tokio::run(server);
+                block_on(warp::serve(redirect)
+                         .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), async { rx80.await.ok(); })
+                         .1);
             });
         }
         let www_root_inner = www_root_dir.clone();
@@ -133,29 +138,32 @@ fn main() {
             /* Run port 443 service */
             println!("Running TLS service on port 443");
             let index = warp::fs::dir(www_root_inner);
-            let ws = warp::ws2()
+            let ws = warp::ws()
                 .and(warp::header::exact(
                     "Sec-WebSocket-Protocol",
                     ACCEPTED_PROTOCOL,
                 ))
-                .map(move |ws: warp::ws::Ws2| {
+                .map(move |ws: warp::ws::Ws| {
                     let srv_addr = srv_addr_inner.clone();
-                    // And then our closure will be called when it completes...
-                    ws.on_upgrade(move |websocket| run_websocket_proxy(websocket, &srv_addr))
+                    ws.on_upgrade(move |websocket| {
+                        run_websocket_proxy(websocket, &srv_addr) 
+                    })
                 })
-                .with(warp::reply::with::header(
+            .with(warp::reply::with::header(
                     "Sec-WebSocket-Protocol",
-                    "mles-websocket",
-                ));
+                    "mles-websocket"
+                    ));
 
             let tlsroutes = ws.or(index);
-
-            let (_, server) = warp::serve(tlsroutes)
-                .tls(&pem_name, &key_name)
-                .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), rx);
-
-            thread::spawn(|| {
-                tokio::run(server);
+            let key_name = key_name.clone();
+            let pem_name = pem_name.clone();
+            thread::spawn(move || {
+                block_on(warp::serve(tlsroutes)
+                         .tls()
+                         .cert_path(&pem_name)
+                         .key_path(&key_name)
+                         .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), async { rx.await.ok(); })
+                         .1);
             });
         }
 
@@ -181,6 +189,7 @@ impl TokioDecoder for Bytes {
     type Error = io::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> io::Result<Option<BytesMut>> {
+        /*
         if buf.len() >= MsgHdr::get_hdrkey_len() {
             let msghdr = MsgHdr::decode(buf.to_vec());
             // HDRKEYL is header min size
@@ -205,8 +214,8 @@ impl TokioDecoder for Bytes {
             }
             buf.split_to(MsgHdr::get_hdrkey_len());
             return Ok(Some(buf.split_to(hdr_len)));
-        }
-        Ok(None)
+        }*/
+        Ok(Some(buf.split_to(0)))
     }
 
     fn decode_eof(&mut self, buf: &mut BytesMut) -> io::Result<Option<BytesMut>> {
@@ -214,12 +223,11 @@ impl TokioDecoder for Bytes {
     }
 }
 
-impl TokioEncoder for Bytes {
-    type Item = Vec<u8>;
+impl TokioEncoder<Vec<u8>> for Bytes {
     type Error = io::Error;
 
-    fn encode(&mut self, data: Vec<u8>, buf: &mut BytesMut) -> io::Result<()> {
-        buf.extend_from_slice(&data[..]);
+    fn encode(&mut self, item: Vec<u8>, buf: &mut BytesMut) -> io::Result<()> {
+        buf.extend_from_slice(&item[..]);
         Ok(())
     }
 }
@@ -291,7 +299,8 @@ fn request_cert(
             let chall = auths[0].http_challenge();
 
             // The token is the filename.
-            let token = Box::leak(chall.http_token().to_string().into_boxed_str());
+            let token: &'static str = Box::leak(chall.http_token().to_string().into_boxed_str());
+
             // The proof is the contents of the file
             let proof = chall.http_proof();
 
@@ -309,10 +318,10 @@ fn request_cert(
                 )
             });
             let (tx80, rx80) = oneshot::channel();
-            let (_, server) = warp::serve(token.or(redirect))
-                .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
             thread::spawn(|| {
-                tokio::run(server);
+                block_on(warp::serve(token.or(redirect))
+                         .bind_with_graceful_shutdown(([0, 0, 0, 0], 80),  async { rx80.await.ok(); })
+                         .1);
             });
             // After the file is accessible from the web, the calls
             // this to tell the ACME API to start checking the
@@ -363,7 +372,16 @@ fn time_to_expiration<P: AsRef<std::path::Path>>(p: P) -> Option<std::time::Dura
 fn run_websocket_proxy(
     websocket: warp::ws::WebSocket,
     srv_addr: &str,
-) -> impl Future<Item = (), Error = ()> + Send + 'static {
+    ) -> impl Future<Output = ()> + Send + 'static {
+    // Just echo all messages back...
+    let (tx, rx) = websocket.split();
+    rx.forward(tx).map(|result| {
+        if let Err(e) = result {
+            eprintln!("websocket error: {:?}", e);
+        }
+    })
+}
+/*
     let raddr = srv_addr.parse::<SocketAddr>().unwrap(); //already checked
 
     let keyval = match env::var("MLES_KEY") {
@@ -435,7 +453,6 @@ fn run_websocket_proxy(
         }
         Ok(())
     });
-
     let aeschannel_ecb_inner = aeschannel_ecb.clone();
     let tcp_to_ws_writer = ws_rx.for_each(move |buf: Vec<_>| {
         let mut decoded_message = Msg::decode(&buf);
@@ -786,3 +803,4 @@ fn run_websocket_proxy(
         .select(send_wsrx.map(|_| ()).map_err(|_| ()))
         .then(|_| Ok(()))
 }
+    */
