@@ -10,7 +10,7 @@ futures = "0.3"
 acme-lib = "0.8"
 warp = { version = "0.2", features=["tls"] }
 tokio-util = { version = "0.3", features = ["codec"] }
-#mles-utils = "1.1.0"
+mles-utils = "1.1.0"
 bytes = "0.5"
 x509-parser = "0.7"
 blake2 = "0.9"

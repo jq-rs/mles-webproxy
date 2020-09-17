@@ -6,7 +6,8 @@
  */
 use futures::channel::oneshot;
 use futures::executor::block_on;
-use futures::StreamExt;
+use futures::future;
+use futures::stream::{self, StreamExt};
 use futures::TryFutureExt;
 use futures::FutureExt;
 use std::thread;
@@ -15,9 +16,10 @@ use warp::{path, Filter, Future, Stream};
 
 use bytes::BytesMut;
 use core::sync::atomic::{AtomicUsize, Ordering};
-//use futures::sync::mpsc::unbounded;
-//use futures::sync::mpsc::UnboundedSender;
+use futures::channel::mpsc::unbounded;
+use futures::channel::mpsc::UnboundedSender;
 use futures::Sink;
+use futures::SinkExt;
 use std::io::{self};
 use std::io::{Error, ErrorKind};
 use std::net::SocketAddr;
@@ -25,7 +27,6 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::{env, process};
 use tokio::net::TcpStream;
-//use tokio_io::codec::Decoder;
 use tokio_util::codec::{Decoder as TokioDecoder, Encoder as TokioEncoder};
 
 use std::collections::HashMap;
@@ -43,9 +44,9 @@ use base64::{decode as b64decode, encode as b64encode};
 use aes_ctr::stream_cipher::{NewStreamCipher, SyncStreamCipher};
 use aes_ctr::Aes128Ctr;
 
-//use mles_utils::*;
+use mles_utils::*;
 use std::time::Duration;
-//use tokio::timer::Interval;
+use tokio::time;
 
 const KEEPALIVE: u64 = 5;
 const ACCEPTED_PROTOCOL: &str = "mles-websocket";
@@ -189,7 +190,6 @@ impl TokioDecoder for Bytes {
     type Error = io::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> io::Result<Option<BytesMut>> {
-        /*
         if buf.len() >= MsgHdr::get_hdrkey_len() {
             let msghdr = MsgHdr::decode(buf.to_vec());
             // HDRKEYL is header min size
@@ -214,8 +214,8 @@ impl TokioDecoder for Bytes {
             }
             buf.split_to(MsgHdr::get_hdrkey_len());
             return Ok(Some(buf.split_to(hdr_len)));
-        }*/
-        Ok(Some(buf.split_to(0)))
+        }
+        Ok(None)
     }
 
     fn decode_eof(&mut self, buf: &mut BytesMut) -> io::Result<Option<BytesMut>> {
@@ -374,14 +374,14 @@ fn run_websocket_proxy(
     srv_addr: &str,
     ) -> impl Future<Output = ()> + Send + 'static {
     // Just echo all messages back...
+    /*
     let (tx, rx) = websocket.split();
     rx.forward(tx).map(|result| {
         if let Err(e) = result {
             eprintln!("websocket error: {:?}", e);
         }
     })
-}
-/*
+    */
     let raddr = srv_addr.parse::<SocketAddr>().unwrap(); //already checked
 
     let keyval = match env::var("MLES_KEY") {
@@ -409,7 +409,7 @@ fn run_websocket_proxy(
     let (sink, stream) = websocket.split();
 
     let when = Duration::from_millis(12000);
-    let task = Interval::new_interval(when);
+    let task = time::interval(when);
 
     let ping_cntr_inner = ping_cntr;
     let pong_cntr_inner = pong_cntr.clone();
@@ -422,36 +422,43 @@ fn run_websocket_proxy(
             if pong_cnt + 1 < prev_ping_cnt {
                 println!("Dropping inactive TLS connection..");
                 let _ = mles_tx_inner
-                    .start_send(Vec::new())
+                    .unbounded_send(Vec::new())
                     .map_err(|err| Error::new(ErrorKind::Other, err));
+                /*
                 let _ = mles_tx_inner
-                    .poll_complete()
+                    .poll_ready()
                     .map_err(|err| Error::new(ErrorKind::Other, err));
+                    */
             }
             let _ = combined_tx_inner
-                .start_send(Message::ping(Vec::new()))
+                .unbounded_send(Message::ping(Vec::new()))
                 .map_err(|err| Error::new(ErrorKind::Other, err));
+            future::ready(())
+            /*
             let _ = combined_tx_inner
-                .poll_complete()
-                .map_err(|err| Error::new(ErrorKind::Other, err));
-            Ok(())
-        })
-        .map_err(|e| panic!("delay errored; err={:?}", e));
+                .poll_ready()
+                .map_err(|err| Error::new(ErrorKind::Other, err));*/
+        });
+
+        //.map_err(|e| panic!("delay errored; err={:?}", e));
 
     let mut mles_tx_inner = mles_tx.clone();
-    let ws_reader = stream.for_each(move |message: Message| {
-        if message.is_pong() {
-            let _ = pong_cntr.fetch_add(1, Ordering::Relaxed);
-        } else {
-            let mles_message = message.into_bytes();
-            let _ = mles_tx_inner
-                .start_send(mles_message)
-                .map_err(|err| Error::new(ErrorKind::Other, err));
-            let _ = mles_tx_inner
-                .poll_complete()
-                .map_err(|err| Error::new(ErrorKind::Other, err));
+    let ws_reader = stream.for_each(move |message: Result<Message, warp::Error>| {
+        if let Ok(message) = message {
+            if message.is_pong() {
+                let _ = pong_cntr.fetch_add(1, Ordering::Relaxed);
+            } else {
+                let mles_message = message.into_bytes();
+                let _ = mles_tx_inner
+                    .unbounded_send(mles_message)
+                    .map_err(|err| Error::new(ErrorKind::Other, err));
+                /*
+                   let _ = mles_tx_inner
+                   .poll_ready()
+                   .map_err(|err| Error::new(ErrorKind::Other, err)); */
+            }
         }
-        Ok(())
+        future::ready(())
     });
     let aeschannel_ecb_inner = aeschannel_ecb.clone();
     let tcp_to_ws_writer = ws_rx.for_each(move |buf: Vec<_>| {
@@ -464,7 +471,7 @@ fn run_websocket_proxy(
         if channel.is_empty() || uid.is_empty() || decoded_message.get_message_len() <= AES_NONCELEN
         {
             /* Just drop handling */
-            return Ok(());
+            return future::ready(());
         }
 
         let aeschannel_ecb_locked = aeschannel_ecb_inner.lock().unwrap();
@@ -478,31 +485,31 @@ fn run_websocket_proxy(
             if let Ok(uid) = cipher.decrypt_vec(&uid) {
                 duid = uid;
             } else {
-                return Ok(());
+                return future::ready(());
             }
         } else {
-            return Ok(());
+            return future::ready(());
         }
         if let Ok(channel) = b64decode(channel) {
             let cipher = Aes128Ecb::new_var(aesecbkey, Default::default()).unwrap();
             if let Ok(channel) = cipher.decrypt_vec(&channel) {
                 dchannel = channel;
             } else {
-                return Ok(());
+                return future::ready(());
             }
         } else {
-            return Ok(());
+            return future::ready(());
         }
 
         if let Ok(duid) = String::from_utf8(duid) {
             decoded_message = decoded_message.set_uid(duid);
         } else {
-            return Ok(());
+            return future::ready(());
         }
         if let Ok(dchannel) = String::from_utf8(dchannel) {
             decoded_message = decoded_message.set_channel(dchannel);
         } else {
-            return Ok(());
+            return future::ready(());
         }
 
         let msg: &mut Vec<u8> = decoded_message.get_mut_message();
@@ -519,15 +526,17 @@ fn run_websocket_proxy(
 
         let msg = Message::binary(dbuf);
         let _ = combined_tx
-            .start_send(msg)
+            .unbounded_send(msg)
             .map_err(|err| Error::new(ErrorKind::Other, err));
+        /*
         let _ = combined_tx
-            .poll_complete()
+            .poll_ready()
             .map_err(|err| Error::new(ErrorKind::Other, err));
-        Ok(())
+            */
+        future::ready(())
     });
 
-    let mles_rx = mles_rx.map_err(|_| panic!("Mles rx just got an error")); //no errors on RX
+    //let mles_rx = mles_rx.map_err(|_| panic!("Mles rx just got an error")); //no errors on RX
     let keyval_inner = keyval;
     let keyaddr_inner = keyaddr;
     let ws_tx_inner = ws_tx;
@@ -541,7 +550,8 @@ fn run_websocket_proxy(
         if buf.is_empty() {
             /* This will gracefully close all connections
              * as they go out of scope */
-            return Err(Error::new(ErrorKind::BrokenPipe, "Keepalive timeout"));
+            return future::ready(());
+            //return Err(Error::new(ErrorKind::BrokenPipe, "Keepalive timeout"));
         }
         let mut decoded_message = Msg::decode(buf.as_slice());
 
@@ -551,7 +561,8 @@ fn run_websocket_proxy(
 
         if channel.is_empty() || uid.is_empty() || decoded_message.get_message_len() <= AES_NONCELEN
         {
-            return Ok(());
+            return future::ready(());
+            //return Ok(());
         }
 
         let channel = channel.to_string();
@@ -564,7 +575,8 @@ fn run_websocket_proxy(
             if aeschannel_ecb_locked.0.is_empty() {
                 //drop unlucky as not yet fully initialized TODO FIXME
                 println!("Dropped too early frame..");
-                return Ok(());
+                return future::ready(());
+                //return Ok(());
             }
             let aeskey = GenericArray::from_slice(&aeschannel_ecb_locked.0);
             let aesecbkey = &aeschannel_ecb_locked.1;
@@ -595,15 +607,19 @@ fn run_websocket_proxy(
                 let mut msgv = msghdr.encode();
                 msgv.extend(cbuf);
                 if let Err(_) = tcp_sink_tx
-                    .start_send(msgv) {
-                        return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
+                    .unbounded_send(msgv) {
+                        return future::ready(());
+                        //return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
                     };
+                /*
                 if let Err(_) = tcp_sink_tx
-                    .poll_complete() {
+                    .poll_ready() {
                         return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
                     };
+                    */
             }
-            return Ok(());
+            return future::ready(());
+            //return Ok(());
         }
         let (tcp_sink_tx, tcp_sink_rx) = unbounded();
         let keyval = keyval_inner.clone();
@@ -619,11 +635,12 @@ fn run_websocket_proxy(
         let client = tcp
             .and_then(move |stream| {
                 let _val = stream
-                    .set_nodelay(true)
-                    .map_err(|_| panic!("Cannot set to no delay"));
+                    .set_nodelay(true);
+
+                    //.map_err(|_| panic!("Cannot set to no delay"));
                 let _val = stream
-                    .set_keepalive(Some(Duration::new(KEEPALIVE, 0)))
-                    .map_err(|_| panic!("Cannot set keepalive"));
+                    .set_keepalive(Some(Duration::new(KEEPALIVE, 0)));
+                    //.map_err(|_| panic!("Cannot set keepalive"));
                 let laddr = match stream.local_addr() {
                     Ok(laddr) => laddr,
                     Err(_) => {
@@ -710,97 +727,101 @@ fn run_websocket_proxy(
 
                 // send the message
                 let _ = tcp_sink
-                    .start_send(msgv)
-                    .map_err(|err| Error::new(ErrorKind::Other, err));
+                    //.start_send(msgv)
+                    .send(msgv);
+                    //.map_err(|err| Error::new(ErrorKind::Other, err));
+                /*
                 let _ = tcp_sink
-                    .poll_complete()
+                    .poll_ready()
                     .map_err(|err| Error::new(ErrorKind::Other, err));
+                    */
 
                 // arrange proxy task
-                let tcp_sink_rx = tcp_sink_rx.map_err(|_| panic!("Sink rx just got an error")); //no errors on RX
+                //let tcp_sink_rx = tcp_sink_rx.map_err(|_| panic!("Sink rx just got an error")); //no errors on RX
                 let write_tcp = tcp_sink_rx
                     .for_each(move |buf| {
+                            let _ = tcp_sink
+                                .send(buf);
+                           // {
+                            //        return future::ready(());
+                                    //return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
+                              //  };
+                        /*
                         if let Err(_) = tcp_sink
-                            .start_send(buf) {
+                            .poll_ready() {
                                 return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
                             };
-                        if let Err(_) = tcp_sink
-                            .poll_complete() {
-                                return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
-                            };
-                        Ok(())
-                    })
-                .map_err(|err| {
-                    println!("Got error {:#?} to write_tcp!", err);
-                });
+                            */
+                        return future::ready(());
+                    });
+                //.map_err(|err| {
+                //    println!("Got error {:#?} to write_tcp!", err);
+                //});
 
                 let write_wstx = tcp_stream
                     .for_each(move |buf| {
                         // send to websocket
+                        if let Ok(buf) = buf {
+                            let _ = ws_tx
+                                .send(buf.to_vec());
+                        }
+                        /*
                         if let Err(_) = ws_tx
-                            .start_send(buf.to_vec()) {
+                            .poll_ready() {
                                 return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
                             };
-                        if let Err(_) = ws_tx
-                            .poll_complete() {
-                                return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
-                            };
-                        Ok(())
-                    })
-                .map_err(|err| {
-                    println!("Got error {:#?} to write_wstx!", err);
-                });
+                            */
+                        return future::ready(());
+                    });
+                //.map_err(|err| {
+                //    println!("Got error {:#?} to write_wstx!", err);
+                //});
 
-                write_tcp
-                    .map(|_| ())
-                    .select(write_wstx.map(|_| ()))
+                future::select(
+                    write_tcp, write_wstx)
                     .then(move |_| {
+                        /*let _ = mles_tx
+                            .unbounded_send(Vec::new());*/
+                        /*
                         if let Err(_) = mles_tx
-                            .start_send(Vec::new()) {
+                            .poll_ready() {
                                 return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
-                            };
-                        if let Err(_) = mles_tx
-                            .poll_complete() {
-                                return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
-                            };
-                        Ok(())
+                            };*/
+                        return future::ready(());
                     })
-            })
-        .map_err(|_| ());
+            });
+        //.map_err(|_| ());
 
         tokio::spawn(client);
-        Ok(())
+        return future::ready(());
+        //Ok(())
     });
 
-    let ws_writer = combined_rx.fold(sink, move |mut sink, msg| {
+    let ws_writer = combined_rx.fold(sink, |sink, msg| {
+        /*let _ = sink
+            .poll_ready()
+            .map_err(|err| Error::new(ErrorKind::Other, err));*/
         let _ = sink
-            .start_send(msg)
-            .map_err(|err| Error::new(ErrorKind::Other, err));
-        let _ = sink
-            .poll_complete()
-            .map_err(|err| Error::new(ErrorKind::Other, err));
-        Ok(sink)
+            .send(msg);
+            //.map_err(|err| Error::new(ErrorKind::Other, err));
+        return future::ready(sink);
     });
 
-    let connection = ws_reader
-        .map(|_| ())
-        .map_err(|_| ())
-        .select(ws_writer.map(|_| ()).map_err(|_| ()));
+    let connection = 
+        future::select(ws_reader, ws_writer);//.map(|_| ()));
+                //.map_err(|_| ()));
 
-    let conn_with_task = connection
-        .map(|_| ())
-        .map_err(|_| ())
-        .select(task.map(|_| ()).map_err(|_| ()));
+    let conn_with_task =
+        future::select(connection, task);
+                //.map_err(|_| ()));
 
-    let conn_with_task_and_tcp = conn_with_task
-        .map(|_| ())
-        .map_err(|_| ())
-        .select(tcp_to_ws_writer.map(|_| ()).map_err(|_| ()));
+    let conn_with_task_and_tcp =
+        //.map(|_| ())
+        //.map_err(|_| ())
+        future::select(conn_with_task, tcp_to_ws_writer);
+                //.map_err(|_| ()));
 
-    conn_with_task_and_tcp
-        .map(|_| ())
-        .map_err(|_| ())
-        .select(send_wsrx.map(|_| ()).map_err(|_| ()))
-        .then(|_| Ok(()))
+    future::select(
+        conn_with_task_and_tcp, send_wsrx)
+        .then(|_| future::ready(()))
 }
-    */
