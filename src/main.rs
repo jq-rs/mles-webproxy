@@ -8,6 +8,7 @@ use futures::channel::oneshot;
 use futures::executor::block_on;
 use futures::future;
 use futures::stream::{self, StreamExt};
+use futures::future::{Map};
 use futures::TryFutureExt;
 use futures::FutureExt;
 use std::thread;
@@ -21,7 +22,8 @@ use futures::channel::mpsc::UnboundedSender;
 use futures::Sink;
 use futures::SinkExt;
 use std::io::{self};
-use std::io::{Error, ErrorKind};
+//use std::io::{Error, ErrorKind};
+use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -57,7 +59,8 @@ const SRV_ADDR: &str = "35.157.221.129:8077"; // mles.io
 
 const AES_NONCELEN: usize = 16;
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let mut www_root_dir = "".to_string();
     let mut email = "".to_string();
     let mut domain = "".to_string();
@@ -374,14 +377,13 @@ fn run_websocket_proxy(
     srv_addr: &str,
     ) -> impl Future<Output = ()> + Send + 'static {
     // Just echo all messages back...
-    /*
-    let (tx, rx) = websocket.split();
-    rx.forward(tx).map(|result| {
+    /*let (tx, rx) = websocket.split();
+    rx.forward(tx)
+        .map(|result| {
         if let Err(e) = result {
             eprintln!("websocket error: {:?}", e);
         }
-    })
-    */
+    })*/
     let raddr = srv_addr.parse::<SocketAddr>().unwrap(); //already checked
 
     let keyval = match env::var("MLES_KEY") {
@@ -422,8 +424,8 @@ fn run_websocket_proxy(
             if pong_cnt + 1 < prev_ping_cnt {
                 println!("Dropping inactive TLS connection..");
                 let _ = mles_tx_inner
-                    .unbounded_send(Vec::new())
-                    .map_err(|err| Error::new(ErrorKind::Other, err));
+                    .unbounded_send(Vec::new());
+                    //.map_err(|err| Error::new(ErrorKind::Other, err));
                 /*
                 let _ = mles_tx_inner
                     .poll_ready()
@@ -431,8 +433,8 @@ fn run_websocket_proxy(
                     */
             }
             let _ = combined_tx_inner
-                .unbounded_send(Message::ping(Vec::new()))
-                .map_err(|err| Error::new(ErrorKind::Other, err));
+                .unbounded_send(Message::ping(Vec::new()));
+                //.map_err(|err| Error::new(ErrorKind::Other, err));
             future::ready(())
             /*
             let _ = combined_tx_inner
@@ -450,8 +452,8 @@ fn run_websocket_proxy(
             } else {
                 let mles_message = message.into_bytes();
                 let _ = mles_tx_inner
-                    .unbounded_send(mles_message)
-                    .map_err(|err| Error::new(ErrorKind::Other, err));
+                    .unbounded_send(mles_message);
+                    //.map_err(|err| Error::new(ErrorKind::Other, err));
                 /*
                    let _ = mles_tx_inner
                    .poll_ready()
@@ -526,8 +528,8 @@ fn run_websocket_proxy(
 
         let msg = Message::binary(dbuf);
         let _ = combined_tx
-            .unbounded_send(msg)
-            .map_err(|err| Error::new(ErrorKind::Other, err));
+            .unbounded_send(msg);
+            //.map_err(|err| Error::new(ErrorKind::Other, err));
         /*
         let _ = combined_tx
             .poll_ready()
@@ -606,11 +608,11 @@ fn run_websocket_proxy(
                 let msghdr = MsgHdr::new(cbuf.len() as u32, *cid, *key);
                 let mut msgv = msghdr.encode();
                 msgv.extend(cbuf);
-                if let Err(_) = tcp_sink_tx
-                    .unbounded_send(msgv) {
-                        return future::ready(());
+                let _= tcp_sink_tx
+                    .unbounded_send(msgv);
+                        //return future::ready(());
                         //return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
-                    };
+                    //};
                 /*
                 if let Err(_) = tcp_sink_tx
                     .poll_ready() {
@@ -619,6 +621,7 @@ fn run_websocket_proxy(
                     */
             }
             return future::ready(());
+            //return Ok(());
             //return Ok(());
         }
         let (tcp_sink_tx, tcp_sink_rx) = unbounded();
@@ -752,8 +755,15 @@ fn run_websocket_proxy(
                                 return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
                             };
                             */
+                        //return Ok(());
                         return future::ready(());
-                    });
+               //     })
+             //   .map(|result| {
+           //         if let Err(e) = result {
+         //               eprintln!("client error: {:?}", e);
+       //             }
+                });
+            tokio::spawn(write_tcp);
                 //.map_err(|err| {
                 //    println!("Got error {:#?} to write_tcp!", err);
                 //});
@@ -772,11 +782,21 @@ fn run_websocket_proxy(
                             };
                             */
                         return future::ready(());
-                    });
+                        //return Ok(());
+     //               })
+ //               .map(|result| {
+  //                  if let Err(e) = result {
+   //                     eprintln!("client error: {:?}", e);
+    //                }
+                });
                 //.map_err(|err| {
                 //    println!("Got error {:#?} to write_wstx!", err);
                 //});
+            tokio::spawn(write_wstx);
+                        //return Ok(());
+                        return future::ready(());
 
+            /*
                 future::select(
                     write_tcp, write_wstx)
                     .then(move |_| {
@@ -787,17 +807,23 @@ fn run_websocket_proxy(
                             .poll_ready() {
                                 return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
                             };*/
+                        //return Ok(());
                         return future::ready(());
                     })
+            */
             });
-        //.map_err(|_| ());
+        //.then(|x| future::ready(()));
+
+        //client
+        //let client = client.into_future();
 
         tokio::spawn(client);
+        //client
         return future::ready(());
         //Ok(())
     });
 
-    let ws_writer = combined_rx.fold(sink, |sink, msg| {
+    let ws_writer = combined_rx.fold(sink, |mut sink, msg| {
         /*let _ = sink
             .poll_ready()
             .map_err(|err| Error::new(ErrorKind::Other, err));*/
@@ -824,4 +850,5 @@ fn run_websocket_proxy(
     future::select(
         conn_with_task_and_tcp, send_wsrx)
         .then(|_| future::ready(()))
+    //*/
 }
