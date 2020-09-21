@@ -377,7 +377,8 @@ fn run_websocket_proxy(
     srv_addr: &str,
     ) -> impl Future<Output = ()> + Send + 'static {
     // Just echo all messages back...
-    /*let (tx, rx) = websocket.split();
+    /*
+    let (tx, rx) = websocket.split();
     rx.forward(tx)
         .map(|result| {
         if let Err(e) = result {
@@ -553,7 +554,7 @@ fn run_websocket_proxy(
             /* This will gracefully close all connections
              * as they go out of scope */
             return future::ready(());
-            //return Err(Error::new(ErrorKind::BrokenPipe, "Keepalive timeout"));
+            //return future::err(Err(Error::new(ErrorKind::BrokenPipe, "Keepalive timeout")));
         }
         let mut decoded_message = Msg::decode(buf.as_slice());
 
@@ -634,190 +635,190 @@ fn run_websocket_proxy(
         channel_map.insert(channel.clone(), tcp_sink_tx);
 
         let mut mles_tx = mles_tx_inner.clone();
-        let tcp = TcpStream::connect(&raddr);
-        let client = tcp
-            .and_then(move |stream| {
-                let _val = stream
-                    .set_nodelay(true);
+    
+        tokio::spawn(async move {
+            let tcp = TcpStream::connect(&raddr).await.unwrap();
+            let stream = tcp;
+            let _val = stream
+                .set_nodelay(true);
 
-                    //.map_err(|_| panic!("Cannot set to no delay"));
-                let _val = stream
-                    .set_keepalive(Some(Duration::new(KEEPALIVE, 0)));
-                    //.map_err(|_| panic!("Cannot set keepalive"));
-                let laddr = match stream.local_addr() {
-                    Ok(laddr) => laddr,
-                    Err(_) => {
-                        let addr = "0.0.0.0:0";
-                        addr.parse::<SocketAddr>().unwrap()
-                    }
-                };
-                let keyval_inner = keyval.clone();
-                let keyaddr_inner = keyaddr.clone();
-                let channel_name = channel.clone();
-
-                let mut keys = Vec::new();
-                if !keyval_inner.is_empty() {
-                    keys.push(keyval_inner);
-                } else {
-                    keys.push(MsgHdr::addr2str(&laddr));
-                    if !keyaddr_inner.is_empty() {
-                        keys.push(keyaddr_inner);
-                    }
+            //.map_err(|_| panic!("Cannot set to no delay"));
+            let _val = stream
+                .set_keepalive(Some(Duration::new(KEEPALIVE, 0)));
+            //.map_err(|_| panic!("Cannot set keepalive"));
+            let laddr = match stream.local_addr() {
+                Ok(laddr) => laddr,
+                Err(_) => {
+                    let addr = "0.0.0.0:0";
+                    addr.parse::<SocketAddr>().unwrap()
                 }
-                let (mut tcp_sink, tcp_stream) = Bytes.framed(stream).split();
+            };
+            let keyval_inner = keyval.clone();
+            let keyaddr_inner = keyaddr.clone();
+            let channel_name = channel.clone();
 
-                let mut aeschannel_ecb_locked = aeschannel_ecb.lock().unwrap();
-                // create keys
-                let channel_clone = channel.clone();
-                let uid_clone = uid.clone();
+            let mut keys = Vec::new();
+            if !keyval_inner.is_empty() {
+                keys.push(keyval_inner);
+            } else {
+                keys.push(MsgHdr::addr2str(&laddr));
+                if !keyaddr_inner.is_empty() {
+                    keys.push(keyaddr_inner);
+                }
+            }
+            let (mut tcp_sink, tcp_stream) = Bytes.framed(stream).split();
 
-                let mut hasher = Blake2s::new();
-                hasher.update(channel_clone.clone());
-                aeschannel_ecb_locked.0 = hasher.finalize().as_slice().to_vec();
-                aeschannel_ecb_locked.0.truncate(AES_NONCELEN);
+            let mut aeschannel_ecb_locked = aeschannel_ecb.lock().unwrap();
+            // create keys
+            let channel_clone = channel.clone();
+            let uid_clone = uid.clone();
 
-                let mut hasher_ecb = Blake2s::new();
-                hasher_ecb.update(channel_clone.clone());
-                let mut hasher_ecb_final = Blake2s::new();
-                hasher_ecb_final.update(hasher_ecb.finalize().as_slice());
-                aeschannel_ecb_locked.1 = hasher_ecb_final.finalize().as_slice().to_vec();
-                aeschannel_ecb_locked.1.truncate(AES_NONCELEN);
+            let mut hasher = Blake2s::new();
+            hasher.update(channel_clone.clone());
+            aeschannel_ecb_locked.0 = hasher.finalize().as_slice().to_vec();
+            aeschannel_ecb_locked.0.truncate(AES_NONCELEN);
 
-                let cipher = Aes128Ecb::new_var(&aeschannel_ecb_locked.1, Default::default()).unwrap();
-                let cuid = cipher.encrypt_vec(&uid_clone.into_bytes());
-                let cipher = Aes128Ecb::new_var(&aeschannel_ecb_locked.1, Default::default()).unwrap();
-                let cchannel = cipher.encrypt_vec(&channel_clone.into_bytes());
+            let mut hasher_ecb = Blake2s::new();
+            hasher_ecb.update(channel_clone.clone());
+            let mut hasher_ecb_final = Blake2s::new();
+            hasher_ecb_final.update(hasher_ecb.finalize().as_slice());
+            aeschannel_ecb_locked.1 = hasher_ecb_final.finalize().as_slice().to_vec();
+            aeschannel_ecb_locked.1.truncate(AES_NONCELEN);
 
-                //create hash for verification
-                keys.push(b64encode(&cuid));
-                keys.push(b64encode(&cchannel));
-                let key = Some(MsgHdr::do_hash(&keys));
-                let cid = Some(MsgHdr::select_cid(key.unwrap()));
-                let cid_val = cid.unwrap();
-                println!("Adding TLS client with cid {:x}", cid_val);
+            let cipher = Aes128Ecb::new_var(&aeschannel_ecb_locked.1, Default::default()).unwrap();
+            let cuid = cipher.encrypt_vec(&uid_clone.into_bytes());
+            let cipher = Aes128Ecb::new_var(&aeschannel_ecb_locked.1, Default::default()).unwrap();
+            let cchannel = cipher.encrypt_vec(&channel_clone.into_bytes());
 
-                //save hash
-                let mut keymap = keymap_inner.lock().unwrap();
-                keymap.insert(channel_name, (key.unwrap(), cid.unwrap()));
+            //create hash for verification
+            keys.push(b64encode(&cuid));
+            keys.push(b64encode(&cchannel));
+            let key = Some(MsgHdr::do_hash(&keys));
+            let cid = Some(MsgHdr::select_cid(key.unwrap()));
+            let cid_val = cid.unwrap();
+            println!("Adding TLS client with cid {:x}", cid_val);
 
-                // handle message
-                let aeskey = GenericArray::from_slice(&aeschannel_ecb_locked.0);
-                let aesecbkey = &aeschannel_ecb_locked.1;
+            //save hash
+            let mut keymap = keymap_inner.lock().unwrap();
+            keymap.insert(channel_name, (key.unwrap(), cid.unwrap()));
 
-                let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
-                let cuid = cipher.encrypt_vec(&uid.clone().into_bytes());
-                let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
-                let cchannel = cipher.encrypt_vec(&channel.clone().into_bytes());
+            // handle message
+            let aeskey = GenericArray::from_slice(&aeschannel_ecb_locked.0);
+            let aesecbkey = &aeschannel_ecb_locked.1;
 
-                decoded_message = decoded_message.set_uid(b64encode(&cuid));
-                decoded_message = decoded_message.set_channel(b64encode(&cchannel));
+            let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
+            let cuid = cipher.encrypt_vec(&uid.clone().into_bytes());
+            let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
+            let cchannel = cipher.encrypt_vec(&channel.clone().into_bytes());
 
-                let msg: &mut Vec<u8> = decoded_message.get_mut_message();
-                let mut aesnonce = Vec::with_capacity(AES_NONCELEN);
-                aesnonce.extend_from_slice(&msg[0..AES_NONCELEN]);
-                let nonce = GenericArray::from_slice(&aesnonce);
+            decoded_message = decoded_message.set_uid(b64encode(&cuid));
+            decoded_message = decoded_message.set_channel(b64encode(&cchannel));
 
-                // create cipher instance
-                let mut cipher = Aes128Ctr::new(&aeskey, &nonce);
-                // apply keystream (encrypt)
-                cipher.apply_keystream(&mut msg[AES_NONCELEN..]);
+            let msg: &mut Vec<u8> = decoded_message.get_mut_message();
+            let mut aesnonce = Vec::with_capacity(AES_NONCELEN);
+            aesnonce.extend_from_slice(&msg[0..AES_NONCELEN]);
+            let nonce = GenericArray::from_slice(&aesnonce);
 
-                let cbuf = decoded_message.encode();
+            // create cipher instance
+            let mut cipher = Aes128Ctr::new(&aeskey, &nonce);
+            // apply keystream (encrypt)
+            cipher.apply_keystream(&mut msg[AES_NONCELEN..]);
 
-                let msghdr = MsgHdr::new(cbuf.len() as u32, cid.unwrap(), key.unwrap());
-                let mut msgv = msghdr.encode();
-                msgv.extend(cbuf);
+            let cbuf = decoded_message.encode();
 
-                // send the message
-                let _ = tcp_sink
-                    //.start_send(msgv)
-                    .send(msgv);
-                    //.map_err(|err| Error::new(ErrorKind::Other, err));
-                /*
-                let _ = tcp_sink
-                    .poll_ready()
-                    .map_err(|err| Error::new(ErrorKind::Other, err));
-                    */
+            let msghdr = MsgHdr::new(cbuf.len() as u32, cid.unwrap(), key.unwrap());
+            let mut msgv = msghdr.encode();
+            msgv.extend(cbuf);
 
-                // arrange proxy task
-                //let tcp_sink_rx = tcp_sink_rx.map_err(|_| panic!("Sink rx just got an error")); //no errors on RX
-                let write_tcp = tcp_sink_rx
-                    .for_each(move |buf| {
-                            let _ = tcp_sink
-                                .send(buf);
-                           // {
-                            //        return future::ready(());
-                                    //return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
-                              //  };
-                        /*
-                        if let Err(_) = tcp_sink
-                            .poll_ready() {
-                                return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
-                            };
-                            */
-                        //return Ok(());
-                        return future::ready(());
-               //     })
-             //   .map(|result| {
-           //         if let Err(e) = result {
-         //               eprintln!("client error: {:?}", e);
-       //             }
-                });
-            tokio::spawn(write_tcp);
-                //.map_err(|err| {
-                //    println!("Got error {:#?} to write_tcp!", err);
-                //});
-
-                let write_wstx = tcp_stream
-                    .for_each(move |buf| {
-                        // send to websocket
-                        if let Ok(buf) = buf {
-                            let _ = ws_tx
-                                .send(buf.to_vec());
-                        }
-                        /*
-                        if let Err(_) = ws_tx
-                            .poll_ready() {
-                                return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
-                            };
-                            */
-                        return future::ready(());
-                        //return Ok(());
-     //               })
- //               .map(|result| {
-  //                  if let Err(e) = result {
-   //                     eprintln!("client error: {:?}", e);
-    //                }
-                });
-                //.map_err(|err| {
-                //    println!("Got error {:#?} to write_wstx!", err);
-                //});
-            tokio::spawn(write_wstx);
-                        //return Ok(());
-                        return future::ready(());
-
+            // send the message
+            let _ = tcp_sink
+                //.start_send(msgv)
+                .send(msgv);
+            //.map_err(|err| Error::new(ErrorKind::Other, err));
             /*
-                future::select(
-                    write_tcp, write_wstx)
-                    .then(move |_| {
-                        /*let _ = mles_tx
-                            .unbounded_send(Vec::new());*/
-                        /*
-                        if let Err(_) = mles_tx
-                            .poll_ready() {
-                                return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
-                            };*/
-                        //return Ok(());
-                        return future::ready(());
-                    })
-            */
-            });
+               let _ = tcp_sink
+               .poll_ready()
+               .map_err(|err| Error::new(ErrorKind::Other, err));
+               */
+
+            // arrange proxy task
+            //let tcp_sink_rx = tcp_sink_rx.map_err(|_| panic!("Sink rx just got an error")); //no errors on RX
+            let write_tcp = tcp_sink_rx
+                .for_each(move |buf| {
+                    let _ = tcp_sink
+                        .send(buf);
+                    // {
+                    //        return future::ready(());
+                    //return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
+                    //  };
+                    /*
+                       if let Err(_) = tcp_sink
+                       .poll_ready() {
+                       return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
+                       };
+                       */
+                    //return Ok(());
+                    return future::ready(());
+                    //     })
+                    //   .map(|result| {
+                    //         if let Err(e) = result {
+                    //               eprintln!("client error: {:?}", e);
+                    //             }
+        });
+        tokio::spawn(write_tcp);
+        //.map_err(|err| {
+        //    println!("Got error {:#?} to write_tcp!", err);
+        //});
+
+        let write_wstx = tcp_stream
+            .for_each(move |buf| {
+                // send to websocket
+                if let Ok(buf) = buf {
+                    let _ = ws_tx
+                        .send(buf.to_vec());
+                }
+                /*
+                   if let Err(_) = ws_tx
+                   .poll_ready() {
+                   return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
+                   };
+                   */
+                return future::ready(());
+                //return Ok(());
+                //               })
+                //               .map(|result| {
+                //                  if let Err(e) = result {
+                //                     eprintln!("client error: {:?}", e);
+                //                }
+        });
+        //.map_err(|err| {
+        //    println!("Got error {:#?} to write_wstx!", err);
+        //});
+        tokio::spawn(write_wstx);
+        //return Ok(());
+
+        /*
+           future::select(
+           write_tcp, write_wstx)
+           .then(move |_| {
+        /*let _ = mles_tx
+        .unbounded_send(Vec::new());*/
+        /*
+           if let Err(_) = mles_tx
+           .poll_ready() {
+           return Err(Error::new(ErrorKind::BrokenPipe, "Broken pipe"));
+           };*/
+        //return Ok(());
+        return future::ready(());
+        })
+        */
+        });
         //.then(|x| future::ready(()));
 
         //client
         //let client = client.into_future();
 
-        tokio::spawn(client);
+        //tokio::spawn(tcp);
         //client
         return future::ready(());
         //Ok(())
@@ -850,5 +851,4 @@ fn run_websocket_proxy(
     future::select(
         conn_with_task_and_tcp, send_wsrx)
         .then(|_| future::ready(()))
-    //*/
 }
