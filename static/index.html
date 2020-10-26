@@ -37,7 +37,7 @@
 
 <p>Mles example client provides basic Tokio based client implementation and includes also a simple WebSocket proxy which allows to use Mles without opening additional public ports, if that is not in some cases feasible.</p>
 
-<p>Mles protocol and reference implementation are stable with v1.0 release. Please have a look at the API <a href="https://docs.rs/mles-utils/1.0.6/mles_utils/">here</a>. For more information about Mles reference implementation, see <a href="https://github.com/jq-rs/mles-rs">https://github.com/jq-rs/mles-rs</a> and the <a href="https://mles.io/blog.html">blog</a> which has more details about the measured performance figures too. Moreover, there is an Mles Websocket Android application available, please check <a href="https://mles.io/app.html">MlesTalk</a>.</p>
+<p>Mles protocol and reference implementation are stable with v1.0 release. Please have a look at the API <a href="https://docs.rs/mles-utils/1.1.5/mles_utils/">here</a>. For more information about Mles reference implementation, see <a href="https://github.com/jq-rs/mles-rs">https://github.com/jq-rs/mles-rs</a> and the <a href="https://mles.io/blog.html">blog</a> which has more details about the measured performance figures too.</p>
 
 <h2>Advanced features: Mles peers and message history</h2>
 
@@ -57,7 +57,7 @@
 </p>
 <p>Any tree-like setup where you have an Mles server should work just fine.</p>
 
-<p>Services that could have benefit of the Mles could be e.g. configuration distribution or IoT telemetry. In general any publish/subscribe service without the need of database on the service itself can be seen as a fine candidate as an use case, especially if it has large amount of clients with limited amount of channels to subscribe. As the mechanism for joining a channel is always per connection and channels cannot be multiplexed on the same connection, Mles may not be the best choice for a client which needs to connect to a very large number of channels.</p>
+<p>Services that could have benefit of the Mles could be e.g. configuration distribution or IoT telemetry. In general any publish/subscribe service without the need of database on the service itself can be seen as a fine candidate as an use case, especially if it has large amount of clients with limited amount of channels to subscribe. As the mechanism for joining a channel is always per connection and channels cannot be multiplexed on the same connection, Mles may not be the best choice for a client which needs to connect to a very large number of channels. It is however possible to use a WebSocket connection over <a href="https://github.com/jq-rs/mles-webproxy">Mles WebProxy</a> which does the TCP connection bundling for the WebSocket client and the client can multiplex several channels on a single WebSocket connection.</p>
 
 <h2>Design notes on client layer protocol</h2>
 
