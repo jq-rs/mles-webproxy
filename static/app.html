@@ -19,13 +19,13 @@
 <div>
 <img src="images/mles_logo_final.png" alt="Mles logo" width="100" />
 </div>
-<p><b>MlesTalk</b> is an instant messenger application which uses Mles (<i>Modern Lightweight channEl Service</i>) - Websocket protocol to exchange information.</p>
+<p><b>MlesTalk</b> is an instant messenger application which uses Mles (<i>Modern Lightweight channEl Service</i>) - WebSocket protocol to exchange information.</p>
 
 <p><a href="https://play.google.com/store/apps/details?id=io.mles.mlestalk"><img src="https://play.google.com/intl/en_us/badges/images/generic/en_badge_web_generic.png" width="300" alt="MlesTalk at Google Play" /></a></p>
 
 <h2>About MlesTalk</h2>
 
-<p>MlesTalk is an open source character-by-character messenger between two or more users on a same channel. See how everyone is writing their messages, character by character! Exchange thoughts faster. Avoid centralized services, have a freedom to pick freely the server to connect to - or even setup your own!</p>
+<p>MlesTalk is an open source character-by-character messenger between two or more users on the same channel. See how everyone is writing their messages, character by character! Exchange thoughts faster. Avoid centralized services of big corporations, have the freedom to pick freely the server to connect to - or even set up your own!</p>
 
 <p>
 <b>Key features:</b>
@@ -54,27 +54,27 @@
 <li>Installation instructions for own Mles WebSocket proxy: <a href="https://github.com/jq-rs/mles-webproxy/blob/master/README.md">README</a></li>
 </ul>
 
-<p>Please join <a href="http://reddit.com/r/mles">/r/mles</a> Reddit community to get info about new features of MlesTalk or Mles procotol in general.</p>
+<p>Please join <a href="http://reddit.com/r/mles">/r/mles</a> Reddit community to get info about new features of MlesTalk or Mles protocol in general.</p>
 
 <p>By purchasing MlesTalk you support its further development.</p>
 
-<p>Connectivity is based on open Mles-Websocket protocol. Please see <a href="https://mles.io">https://mles.io</a> for more information.</p>
+<p>Connectivity is based on open Mles-WebSocket protocol. Please see <a href="https://mles.io">https://mles.io</a> for more information.</p>
 
 <h2>About Mles.io server</h2>
 
-<p>Mles.io has a service server support implemented for the MlesTalk application and this server is suggested by default to be used by the MlesTalk application. Mles.io provides a limited history of messages for users during initial connection, if messages already exists on the channel. The Mles.io service is provided as is as a best effort service without any liability. The MlesTalk application user is free to select any server they wish to connect to, as long as it supports Mles-Websocket protocol.</p>
+<p>Mles.io has a service server support implemented for the MlesTalk application and this server is suggested by default to be used by the MlesTalk application. Mles.io provides a limited history of messages for users during initial connection, if messages already exist on the channel. The Mles.io service is provided as-is as a best-effort service without any liability. The MlesTalk application user is free to select any server they wish to connect to, as long as it supports Mles-WebSocket protocol.</p>
 
-<p>Mles.io will always run the latest released open source version of the Mles-Websocket server service called <a href="https://github.com/jq-rs/mles-webproxy">mles-webproxy</a> and it does not collect any information of MlesTalk application users. Application code is also open sourced under <i>mles-webproxy</i> through the WebUI. The users are always welcome to review the source code of <i>mles-webproxy</i> and establish their own Mles-Websocket server service. Please see <a href="https://mles.io/legal.html">https://mles.io/legal</a> for the full Privacy Notice and other legal information.</p>
+<p>Mles.io will always run the latest released open source version of the Mles-WebSocket server service called <a href="https://github.com/jq-rs/mles-webproxy">mles-webproxy</a> and it does not collect any information of MlesTalk application users. Application code is also open sourced under <i>mles-webproxy</i> through the WebUI. The users are always welcome to review the source code of <i>mles-webproxy</i> and establish their own Mles-WebSocket server service. Please see <a href="https://mles.io/legal.html">https://mles.io/legal</a> for the full Privacy Notice and other legal information.</p>
 
 <h2>Frequently Asked Questions</h2>
 
-<h4>What kind of network connection MlesTalk needs?</h4>
+<h4>What kind of network connection does MlesTalk need?</h4>
 
-<p>MlesTalk uses Mles-Websocket protocol over Transport Layer Security (TLS) protected Transmission Control Protocol (TCP). You should be able to use it with any internet connection. If your connection is not stable, you may need to reconnect from time to time. MlesTalk will do the reconnection attempts for you in usual network glitches.</p>
+<p>MlesTalk uses Mles-WebSocket protocol over Transport Layer Security (TLS) protected Transmission Control Protocol (TCP). You should be able to use it with any internet connection. If your connection is not stable, you may need to reconnect from time to time. MlesTalk will do the reconnection attempts for you in usual network glitches.</p>
 
 <h4>Are sent or received messages saved somewhere for later retrieval by the MlesTalk application?</h4>
 
-<p>Messages are not saved by the application and are in practice lost when the MlesTalk application is closed from application point of view. At least some of the messages on the channel can be restored from an Mles-Websocket server during reconnection to the channel, if the server supports message history.</p>
+<p>Messages are not saved by the application and are in practice lost when the MlesTalk application is closed from an application point of view. At least some of the messages on the channel can be restored from an Mles-WebSocket server during reconnection to the channel if the server supports message history.</p>
 
 <h4>Are the messages secured somehow?</h4>
 
@@ -82,13 +82,13 @@
 
 <p>In addition to TLS encryption, message data is obfuscated end-to-end using symmetrical Blowfish (56-bit, weak key) with CTS+AONT and Blake2 HMAC. While not plain text, please do note that this obfuscation does not protect from serious message opening efforts.</p>
 
-<h4>I cannot log into channel with the same user name twice, i.e from the web GUI. What can I do?</h4>
+<h4>I cannot log into a channel with the same user name twice, i.e from the web GUI. What can I do?</h4>
 
 <p>Please use a different user name for simultaneous logins on the same channel. It is a feature of the Mles protocol that the user name is restricted to one active at a time.</p>
 
 <h4>I'd like to have more than one channel already now. Anything for that?</h4>
 
-<p>You can open several channels to browser tabs from the QR-code link. Another option is, if you accept that you use it at your own risk, to try an app cloner application and have a cloned MlesTalk application login to different channel. You should be able to use it as original software. Please note that cloned applications do not usually get any upgrades.</p>
+<p>You can open several channels to browser tabs from the QR-code link. Another option is, if you accept that you use it at your own risk, to try an app cloner application and have a cloned MlesTalk application login to a different channel. You should be able to use it as the original software. Please note that cloned applications do not usually get any upgrades.</p>
 <br />
 </div>
 </div>
