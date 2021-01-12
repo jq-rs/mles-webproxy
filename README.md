@@ -13,7 +13,7 @@ Please do end-to-end encrypt the data you send anyway. For more details, please 
  3. Open port 80 and 443 of your firewall for Mles WebSocket protocol and Let's Encrypt certificates
  4. Startup `mles-webproxy` Mles WebSocket proxy in your local server. *Notice: this will try to fetch certificates from Let's Encrypt by default*:  `export MLES_KEY=<secret-server-key-string-here>; mles-webproxy <www-root> <email-for-tls> <domain-for-tls> <mles-srv-addr x.x.x.x:p>`
      - default ports 80 and 443 need root privileges
- 5. Connect to port 443 of your server with browser or your Mles WebSocket application
+ 5. Connect to port 443 of your server with a browser or your Mles WebSocket application
   
  Enjoy talking over Mles WebSocket proxy!
  
