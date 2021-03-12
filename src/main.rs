@@ -121,7 +121,7 @@ fn main() {
                 )
             });
             let (_, server) =
-                warp::serve(redirect).bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
+                warp::serve(redirect).bind_with_graceful_shutdown(([0, 0, 0, 0, 0, 0, 0, 0], 80), rx80);
             thread::spawn(|| {
                 tokio::run(server);
             });
@@ -152,7 +152,7 @@ fn main() {
 
             let (_, server) = warp::serve(tlsroutes)
                 .tls(&pem_name, &key_name)
-                .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), rx);
+                .bind_with_graceful_shutdown(([0, 0, 0, 0, 0, 0, 0, 0], 443), rx);
 
             thread::spawn(|| {
                 tokio::run(server);
@@ -310,7 +310,7 @@ fn request_cert(
             });
             let (tx80, rx80) = oneshot::channel();
             let (_, server) = warp::serve(token.or(redirect))
-                .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
+                .bind_with_graceful_shutdown(([0, 0, 0, 0, 0, 0, 0, 0], 80), rx80);
             thread::spawn(|| {
                 tokio::run(server);
             });

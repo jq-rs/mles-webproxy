@@ -1,10 +1,10 @@
 [package]
 name = "mles-webproxy"
-version = "0.8.5"
+version = "0.8.6"
 authors = ["jq-rs"]
 edition = "2018"
 
-description = "Mles WebProxy - an Mles WebSocket proxy and a static WWW-server based on Warp"
+description = "Mles WebProxy - an Mles WebSocket proxy and a static WWW-server"
 license = "MPL-2.0"
 repository = "https://github.com/jq-rs/mles-webproxy/tree/jq-rs/crates.io"
 documentation = "https://mles.io"
