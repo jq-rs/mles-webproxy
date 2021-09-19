@@ -27,17 +27,15 @@ use tokio_io::codec::{Decoder as TokioDecoder, Encoder as TokioEncoder};
 use std::collections::HashMap;
 use std::str::FromStr;
 
-use aes::block_cipher::generic_array::GenericArray;
-use aes::Aes128;
+use aes::cipher::generic_array::GenericArray;
+use aes::cipher::{NewCipher,StreamCipher};
+use aes::{Aes128, Aes128Ctr};
 use blake2::{Blake2s, Digest};
 use block_modes::block_padding::Pkcs7;
 use block_modes::{BlockMode, Ecb};
 type Aes128Ecb = Ecb<Aes128, Pkcs7>;
 
 use base64::{decode as b64decode, encode as b64encode};
-
-use aes_ctr::stream_cipher::{NewStreamCipher, SyncStreamCipher};
-use aes_ctr::Aes128Ctr;
 
 use mles_utils::*;
 use std::time::Duration;
@@ -457,7 +455,7 @@ fn run_websocket_proxy(
         let duid;
         let dchannel;
         if let Ok(uid) = b64decode(uid) {
-            let cipher = Aes128Ecb::new_var(aesecbkey, Default::default()).unwrap();
+            let cipher = Aes128Ecb::new_from_slices(aesecbkey, Default::default()).unwrap();
             if let Ok(uid) = cipher.decrypt_vec(&uid) {
                 duid = uid;
             } else {
@@ -467,7 +465,7 @@ fn run_websocket_proxy(
             return Ok(());
         }
         if let Ok(channel) = b64decode(channel) {
-            let cipher = Aes128Ecb::new_var(aesecbkey, Default::default()).unwrap();
+            let cipher = Aes128Ecb::new_from_slices(aesecbkey, Default::default()).unwrap();
             if let Ok(channel) = cipher.decrypt_vec(&channel) {
                 dchannel = channel;
             } else {
@@ -552,9 +550,9 @@ fn run_websocket_proxy(
             let aeskey = GenericArray::from_slice(&aeschannel_ecb_locked.0);
             let aesecbkey = &aeschannel_ecb_locked.1;
 
-            let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
+            let cipher = Aes128Ecb::new_from_slices(&aesecbkey, Default::default()).unwrap();
             let cuid = cipher.encrypt_vec(&uid.into_bytes());
-            let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
+            let cipher = Aes128Ecb::new_from_slices(&aesecbkey, Default::default()).unwrap();
             let cchannel = cipher.encrypt_vec(&channel.clone().into_bytes());
 
             decoded_message = decoded_message.set_uid(b64encode(&cuid));
@@ -646,9 +644,9 @@ fn run_websocket_proxy(
                 aeschannel_ecb_locked.1 = hasher_ecb_final.finalize().as_slice().to_vec();
                 aeschannel_ecb_locked.1.truncate(AES_NONCELEN);
 
-                let cipher = Aes128Ecb::new_var(&aeschannel_ecb_locked.1, Default::default()).unwrap();
+                let cipher = Aes128Ecb::new_from_slices(&aeschannel_ecb_locked.1, Default::default()).unwrap();
                 let cuid = cipher.encrypt_vec(&uid_clone.into_bytes());
-                let cipher = Aes128Ecb::new_var(&aeschannel_ecb_locked.1, Default::default()).unwrap();
+                let cipher = Aes128Ecb::new_from_slices(&aeschannel_ecb_locked.1, Default::default()).unwrap();
                 let cchannel = cipher.encrypt_vec(&channel_clone.into_bytes());
 
                 //create hash for verification
@@ -667,9 +665,9 @@ fn run_websocket_proxy(
                 let aeskey = GenericArray::from_slice(&aeschannel_ecb_locked.0);
                 let aesecbkey = &aeschannel_ecb_locked.1;
 
-                let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
+                let cipher = Aes128Ecb::new_from_slices(&aesecbkey, Default::default()).unwrap();
                 let cuid = cipher.encrypt_vec(&uid.clone().into_bytes());
-                let cipher = Aes128Ecb::new_var(&aesecbkey, Default::default()).unwrap();
+                let cipher = Aes128Ecb::new_from_slices(&aesecbkey, Default::default()).unwrap();
                 let cchannel = cipher.encrypt_vec(&channel.clone().into_bytes());
 
                 decoded_message = decoded_message.set_uid(b64encode(&cuid));
