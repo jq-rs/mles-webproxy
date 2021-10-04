@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- * Copyright (c) 2019-2020 MlesTalk developers
+ * Copyright (c) 2019-2021 MlesTalk developers
  */
 let gMyName = '';
 let gMyChannel = '';
@@ -21,6 +21,7 @@ let gIdNotifyTs = {};
 let gIdLastMsgLen = {};
 let gPrevBdKey = null;
 let gForwardSecrecy = false;
+let gReadMsgDelayedQueueLen = 0;
 
 /* Msg type flags */
 const MSGISFULL =         0x1;
@@ -46,15 +47,20 @@ const PRESENCE_SHOW_TIMER = 5000; /* ms */
 const RETIMEOUT = 1500; /* ms */
 const MAXTIMEOUT = 1000 * 60 * 5; /* ms */
 const MAXQLEN = 32;
-const RESYNC_TIMEOUT = 15000; /* ms */
+const RESYNC_TIMEOUT = 3000; /* ms */
 const LED_ON_TIME = 500; /* ms */
 const LED_OFF_TIME = 2500; /* ms */
 const SCROLL_TIME = 500; /* ms */
-const ASYNC_SLEEP = 1 /* ms */
+const ASYNC_SLEEP = 3 /* ms */
 let gReconnTimeout = RETIMEOUT;
 let gReconnAttempts = 0;
 
 const DATELEN = 13;
+
+let gMultipartDict = {};
+let gMultipartSendDict = {};
+let gMultipartContinue = false;
+const MULTIPART_SLICE = 4096; //B
 
 let gIsTokenChannel = false;
 let gSipKey;
@@ -602,10 +608,13 @@ function msgHashHandle(uid, channel, msgTimestamp, mhash) {
 	return true;
 }
 
-function processData(uid, channel, msgTimestamp,
+async function processData(uid, channel, msgTimestamp,
 	message, isFull, isPresence, isPresenceAck, presAckRequired, isImage,
 	isMultipart, isFirst, isLast, fsEnabled)
 {
+
+	await sleep(++gReadMsgDelayedQueueLen*ASYNC_SLEEP);
+
 	//update hash
 	let duid = get_duid(uid, channel);
 	if (gIdHash[duid] == null) {
@@ -638,20 +647,29 @@ function processData(uid, channel, msgTimestamp,
 
 	const mHash = hashMessage(uid, isFull ? msgTimestamp + message + '\n' : msgTimestamp + message);
 	if (isMultipart) {
+		//strip index
+		const index = message.substr(0,4);
+		const numIndex = parseInt(index);
+		message = message.substr(4);
+		//console.log("Received image index " + numIndex);
+
 		if (!gMultipartDict[get_uniq(uid, channel)]) {
 			if (!isFirst) {
 				//invalid frame
 				return 0;
 			}
-			gMultipartDict[get_uniq(uid, channel)] = "";
+			gMultipartDict[get_uniq(uid, channel)] = {};
 		}
 		// handle multipart hashing here
 		if(msgHashHandle(uid, channel, msgTimestamp, mHash)) {
-			gMultipartDict[get_uniq(uid, channel)] += message;
+			gMultipartDict[get_uniq(uid, channel)][numIndex] = message;
 			if (!isLast) {
 				return 0;
 			}
-			message = gMultipartDict[get_uniq(uid, channel)];
+			message = "";
+			for (let i = 0; i <= numIndex; i++) {
+				message += gMultipartDict[get_uniq(uid, channel)][i];
+			}
 			gMultipartDict[get_uniq(uid, channel)] = null;
 		}
 		else
@@ -760,7 +778,7 @@ function processData(uid, channel, msgTimestamp,
 function processSend(uid, channel, isMultipart) {
 	if (isMultipart) {
 		if (gMultipartSendDict[get_uniq(uid, channel)]) {
-			multipartContinue = true;
+			gMultipartContinue = true;
 		}
 	}
 	return 0;
@@ -773,9 +791,6 @@ function processClose(uid, channel, mychan) {
 	}
 }
 
-let gMultipartDict = {};
-let gMultipartSendDict = {};
-let multipartContinue = false;
 gWebWorker.onmessage = function (e) {
 	let cmd = e.data[0];
 	switch (cmd) {
@@ -1034,7 +1049,6 @@ function sendMessage(message, isFull, isPresence, isPresenceAck = false) {
 	sendData("send", gMyName, gMyChannel, message, msgtype);
 }
 
-const MULTIPART_SLICE = 768; //B
 async function sendDataurl(dataUrl, uid, channel) {
 	let msgtype = MSGISFULL|MSGISIMAGE;
 
@@ -1042,23 +1056,32 @@ async function sendDataurl(dataUrl, uid, channel) {
 		msgtype |= MSGISMULTIPART;
 		gMultipartSendDict[get_uniq(uid, channel)] = true;
 		for (let i = 0; i < dataUrl.length; i += MULTIPART_SLICE) {
+			let data = "";
+			if(i/MULTIPART_SLICE < 10)
+				data += "000";
+			else if(i/MULTIPART_SLICE < 100)
+				data += "00";
+			else if(i/MULTIPART_SLICE < 1000)
+				data += "0";
+			data += (i/MULTIPART_SLICE).toString();
+			//console.log("Adding image index " + data);
 			if (0 == i) {
 				msgtype |= MSGISFIRST;
 			}
 			else if (i + MULTIPART_SLICE >= dataUrl.length) {
-				msgtype |= MSGISLAST;
+				data += dataUrl.slice(i, dataUrl.length);
 				let data = dataUrl.slice(i, dataUrl.length);
 				sendData("send", gMyName, gMyChannel, data, msgtype);
 				gMultipartSendDict[get_uniq(uid, channel)] = false;
-				multipartContinue = false;
+				gMultipartContinue = false;
 				break;
 			}
-			let data = dataUrl.slice(i, i + MULTIPART_SLICE);
+			data += dataUrl.slice(i, i + MULTIPART_SLICE);
 			sendData("send", gMyName, gMyChannel, data, msgtype);
-			while (false == multipartContinue) {
+			while (false == gMultipartContinue) {
 				await sleep(ASYNC_SLEEP);
 			}
-			multipartContinue = false;
+			gMultipartContinue = false;
 		}
 	}
 	else {
