@@ -1,6 +1,7 @@
 p {
     font-size: 18px;
 }
+
 body {
     font-family: 'geneva';
     background: rgb(189,189,189);
@@ -28,3 +29,8 @@ h6 {
 a:link {color:black;}
 a:visited {color: grey;}
 a:hover {text-decoration: none; color: black;}
+img {
+    max-width: 100%;
+    height: auto;
+}
+	
