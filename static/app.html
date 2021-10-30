@@ -84,7 +84,7 @@ MlesTalk is an open-source character-by-character messenger between users on the
 
 <p>Messages are sent over TLS protected connection by default which should be secure.</p>
 
-<p>In addition to transport level TLS encryption, message data is obfuscated end-to-end using symmetrical Blowfish (56-bit, weak key) with ciphertext stealing (CTS), all-or-nothing transform (AONT), Blake2 HMAC and Padmé padding. For a longer real-time communication, an ephemeral Burmester-Desmedt (BD) key is exchanged. When it is applied, it can be identified by a font colour change. While message data is not plain text, please do note that this obfuscation does not protect from serious message opening efforts.</p>
+<p>In addition to transport level TLS encryption, message data is obfuscated end-to-end using symmetrical Blowfish (56-bit, weak key) with ciphertext stealing (CTS), all-or-nothing transform (AONT), Blake2 HMAC and Padmé padding. Shared key is passed through password-based key derivation function scrypt. For a longer real-time communication, an ephemeral Burmester-Desmedt (BD) key is exchanged. When it is applied, it can be identified by a font colour change. While message data is not plain text, please do note that this obfuscation does not protect from serious message opening efforts.</p>
 
 <h4>I cannot log into a channel with the same user name twice, i.e from the web GUI. What can I do?</h4>
 
