@@ -2,6 +2,10 @@ p {
     font-size: 18px;
 }
 
+li {
+    font-size: 18px;
+}
+
 body {
     font-family: 'geneva';
     background: rgb(189,189,189);
