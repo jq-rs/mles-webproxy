@@ -7,7 +7,7 @@ li {
 }
 
 body {
-    font-family: 'geneva';
+    font-family: geneva, helvetica, sans-serif;
     background: rgb(189,189,189);
     background: linear-gradient(225deg, rgba(189,189,189,1) 1%, rgba(255,255,255,1) 15%, rgba(255,255,255,1) 70%);
 }
