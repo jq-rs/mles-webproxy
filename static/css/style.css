@@ -1,3 +1,8 @@
+@font-face {
+    font-family: "Ubuntu Mono", monospace;
+    src: url('https://fonts.googleapis.com/css2?family=Ubuntu+Mono&display=swap');
+}
+
 p {
     font-size: 18px;
 }
@@ -7,7 +12,7 @@ li {
 }
 
 body {
-    font-family: geneva, helvetica, sans-serif;
+    font-family: "Ubuntu Mono", monospace;
     background: rgb(189,189,189);
     background: linear-gradient(225deg, rgba(189,189,189,1) 1%, rgba(255,255,255,1) 15%, rgba(255,255,255,1) 70%);
 }
