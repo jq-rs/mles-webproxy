@@ -1,3 +1,11 @@
+@font-face {
+    font-family: "Ubuntu Mono", monospace;
+    src: url('css/font/UbuntuMono-Regular.ttf');
+}
+* {
+    font-family: "Ubuntu Mono", monospace;
+    }
+
 body {
     padding: 0;
     margin: 0;
@@ -63,7 +71,7 @@ input.exit_button {
 }
 
 #name_channel_cont p {
-    font-family: sans-serif;
+    font-family: "Ubuntu Mono", monospace;
     font-size: 16px;
     color: #77407b;
 }
@@ -75,7 +83,7 @@ input.exit_button {
     display: block;
     margin: 0 auto;
     outline: none;
-    font-family: sans-serif;
+    font-family: "Ubuntu Mono", monospace;
 }
 
 #name_channel_cont #input_channel {
@@ -85,7 +93,7 @@ input.exit_button {
     display: block;
     margin: 0 auto;
     outline: none;
-    font-family: sans-serif;
+    font-family: "Ubuntu Mono", monospace;
 }
 
 #name_channel_cont #input_key {
@@ -95,7 +103,7 @@ input.exit_button {
     display: block;
     margin: 0 auto;
     outline: none;
-    font-family: sans-serif;
+    font-family: "Ubuntu Mono", monospace;
 }
 
 #name_channel_cont #input_addr_port {
@@ -105,7 +113,7 @@ input.exit_button {
     display: block;
     margin: 0 auto;
     outline: none;
-    font-family: sans-serif;
+    font-family: "Ubuntu Mono", monospace;
 }
 
 #name_channel_cont #the_join {
@@ -160,7 +168,7 @@ input.exit_button {
 
 #presence_avail li {
     list-style: none;
-    font-family: sans-serif;
+    font-family: "Ubuntu Mono", monospace;
     font-size: 16px;
     padding: 1px 4px;
 }
@@ -193,7 +201,7 @@ input.exit_button {
 
 #messages li {
     list-style: none;
-    font-family: sans-serif;
+    font-family: "Ubuntu Mono", monospace;
     font-size: 16px;
     padding: 1px 4px;
 }
@@ -219,7 +227,7 @@ input.exit_button {
     background: #f0f0f0;
     border: none;
     font-size: 16px;
-    font-family: sans-serif;
+    font-family: "Ubuntu Mono", monospace;
     outline: none;
     padding: 6px;
     float: left;
