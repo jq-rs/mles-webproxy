@@ -74,21 +74,21 @@ By purchasing MlesTalk you support its existing internet server infrastructure a
 
 <h2>Frequently Asked Questions</h2>
 
-<h4>What kind of network connection does MlesTalk need?</h4>
+<h3>What kind of network connection does MlesTalk need?</h3>
 
 <p>MlesTalk uses Mles-WebSocket protocol over Transport Layer Security (TLS) protected Transmission Control Protocol (TCP). You should be able to use it with any internet connection. MlesTalk will do the reconnection attempts for you in usual network glitches and also resend unsent messages.</p>
 
-<h4>Are sent or received messages saved somewhere for later retrieval by the MlesTalk application?</h4>
+<h3>Are sent or received messages saved somewhere for later retrieval by the MlesTalk application?</h3>
 
 <p>Messages are not saved permanently by the MlesTalk application. The messages in device memory are lost when the MlesTalk application is closed from an application point of view. To support asynchronous communication, some of the messages on the channel can be restored from a Mles-WebSocket server during reconnection to the channel if the server supports a message history. Mles.io supports message history of 1000 messages per channel where every new character uses one message.</p>
 
-<h4>Are the messages secured somehow?</h4>
+<h3>Are the messages secured somehow?</h3>
 
 <p>Messages are sent over TLS protected connection by default which should be secure.</p>
 
 <p>In addition to transport-level TLS encryption, message data is obfuscated end-to-end using symmetrical Blowfish (56-bit, weak key) with ciphertext stealing (CTS), all-or-nothing transform (AONT), Blake2 HMAC and Padmé padding. The shared key is passed through the password-based key derivation function scrypt. For longer real-time communication, an ephemeral Burmester-Desmedt (BD) key is exchanged. When it is applied, it can be identified from a font colour change. While the message data is not plain text, please do note that this obfuscation does not protect from serious message opening efforts.</p>
 
-<h4>I cannot log into a channel with the same user name twice, i.e from the web GUI. What can I do?</h4>
+<h3>I cannot log into a channel with the same user name twice, i.e from the web GUI. What can I do?</h3>
 
 <p>Please use a different user name for simultaneous logins on the same channel. It is a feature of the Mles protocol that the user name is restricted to one active at a time. You can identify this situation from the GUI where it constantly logs into a channel but never receives any messages.</p>
 <br />
