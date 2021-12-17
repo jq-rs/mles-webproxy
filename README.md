@@ -20,5 +20,5 @@ Please do end-to-end encrypt the data you send anyway. For more details, please 
  ## Available public proxy servers
  
    * https://mles.io:443
-   * \<add your public server here\>
+   * \<please add your public server here\>
  
