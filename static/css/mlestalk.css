@@ -1,10 +1,11 @@
 @font-face {
     font-family: "Ubuntu Mono", monospace;
-    src: url('css/font/UbuntuMono-Regular.ttf');
+    src: url(font/UbuntuMono-Regular.ttf);
 }
+
 * {
     font-family: "Ubuntu Mono", monospace;
-    }
+}
 
 body {
     padding: 0;
