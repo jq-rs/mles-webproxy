@@ -23,6 +23,6 @@ For the crates.io-version, please check [crates.io-branch](https://github.com/jq
  ## Available public proxy servers
  
    * https://mles.io:443
-   * \<add your public server here\>
+   * \<please add your public server here\>
  
  P.S. Please send a PR if some of this info is outdated.
