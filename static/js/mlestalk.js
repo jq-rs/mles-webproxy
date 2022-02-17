@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- * Copyright (c) 2019-2021 MlesTalk developers
+ * Copyright (c) 2019-2022 MlesTalk developers
  */
 let gMyName = '';
 let gMyChannel = '';
@@ -21,7 +21,6 @@ let gIdNotifyTs = {};
 let gIdLastMsgLen = {};
 let gPrevBdKey = null;
 let gForwardSecrecy = false;
-let gReadMsgDelayedQueueLen = 0;
 
 /* Msg type flags */
 const MSGISFULL =         0x1;
@@ -37,9 +36,6 @@ const MSGISBDACK =       (0x1 << 9);
 
 let gUidQueue = {};
 
-const IMGMAXSIZE = 960; /* px */
-const IMGFRAGSIZE = 512 * 1024;
-
 let gInitOk = false;
 const PRESENCETIME = (3 * 60 + 1) * 1000 ; /* ms */
 const IDLETIME = (11 * 60 + 1) * 1000; /* ms */
@@ -51,16 +47,14 @@ const RESYNC_TIMEOUT = 3000; /* ms */
 const LED_ON_TIME = 500; /* ms */
 const LED_OFF_TIME = 2500; /* ms */
 const SCROLL_TIME = 500; /* ms */
-const ASYNC_SLEEP = 3 /* ms */
+const IMG_THUMBSZ = 100; /* px */
 let gReconnTimeout = RETIMEOUT;
 let gReconnAttempts = 0;
 
-const DATELEN = 13;
-
 let gMultipartDict = {};
-let gMultipartSendDict = {};
-let gMultipartContinue = false;
-const MULTIPART_SLICE = 4096; //B
+let gMultipartIndex = {};
+
+const DATELEN = 13;
 
 let gIsTokenChannel = false;
 let gSipKey;
@@ -90,7 +84,7 @@ let gBgTitle = "MlesTalk in the background";
 let gBgText = "Notifications active";
 let gImageStr = "<an image>";
 
-const FSFONTCOLOR = "#899CD4";
+const FSFONTCOLOR = "#8bac89";
 
 class Queue {
 	constructor(...elements) {
@@ -101,6 +95,11 @@ class Queue {
 		if (this.getLength() >= this.maxLength())
 			this.shift();
 		return this.elements.push(...args);
+	}
+	insert(val, obj) {
+		if (val >= 0 && val <= this.getLength()) {
+			this.elements.splice(val, 0, obj);
+		}
 	}
 	get(val) {
 		if (val >= 0 && val < this.getLength()) {
@@ -425,7 +424,7 @@ function sendInitJoin() {
 	sendMessage("", true, false);
 }
 
-async function send(isFull) {
+function send(isFull) {
 	let message = $('#input_message').val();
 	//let file = document.getElementById("input_file").files[0];
 
@@ -435,7 +434,6 @@ async function send(isFull) {
 	//}
 	//else {
 		sendMessage(message, isFull, false);
-		await sleep(ASYNC_SLEEP); //in case fs state changes, wait a while
 		updateAfterSend(message, isFull, false);
 	//}
 }
@@ -613,8 +611,6 @@ async function processData(uid, channel, msgTimestamp,
 	isMultipart, isFirst, isLast, fsEnabled)
 {
 
-	await sleep(++gReadMsgDelayedQueueLen*ASYNC_SLEEP);
-
 	//update hash
 	let duid = get_duid(uid, channel);
 	if (gIdHash[duid] == null) {
@@ -623,6 +619,7 @@ async function processData(uid, channel, msgTimestamp,
 		gPresenceTs[get_uniq(uid, channel)] = msgTimestamp;
 		gIdNotifyTs[get_uniq(uid, channel)] = 0;
 	}
+	let li;
 
 	let dateString = "[" + stampTime(new Date(msgTimestamp)) + "] ";
 
@@ -648,38 +645,105 @@ async function processData(uid, channel, msgTimestamp,
 	const mHash = hashMessage(uid, isFull ? msgTimestamp + message + '\n' : msgTimestamp + message);
 	if (isMultipart) {
 		//strip index
-		const index = message.substr(0,4);
-		const numIndex = parseInt(index);
-		message = message.substr(4);
-		//console.log("Received image index " + numIndex);
+		const index = message.substr(0, 8);
+		const dict = uid + message.substr(0, 4);
+		const numIndex = parseInt(index, 16);
+		message = message.substr(8);
 
-		if (!gMultipartDict[get_uniq(uid, channel)]) {
+		if (message.length > 2048) {
+			//invalid image
+			return 0;
+		}
+
+		if (!gMultipartDict[get_uniq(dict, channel)]) {
 			if (!isFirst) {
 				//invalid frame
 				return 0;
 			}
-			gMultipartDict[get_uniq(uid, channel)] = {};
+
+			const timed = updateTime(dateString);
+			gMultipartDict[get_uniq(dict, channel)] = {};
+			gMultipartIndex[get_uniq(dict, channel)] = [numIndex, timed];
 		}
+
+		if (!gMultipartIndex[get_uniq(dict, channel)]) {
+			//invalid index
+			return 0;
+		}
+
+		if (gLastMessageSeenTs < msgTimestamp)
+			gLastMessageSeenTs = msgTimestamp;
+
 		// handle multipart hashing here
-		if(msgHashHandle(uid, channel, msgTimestamp, mHash)) {
-			gMultipartDict[get_uniq(uid, channel)][numIndex] = message;
+		if (msgHashHandle(uid, channel, msgTimestamp, mHash)) {
+			if (isFirst) {
+				const dated = updateDateval(dateString);
+				if (dated) {
+					/* Update new date header */
+					li = '<li class="new"> - <span class="name">' + dated + '</span> - </li>';
+					$('#messages').append(li);
+				}
+				li = '<div id="' + duid + '' + numIndex.toString(16) + '"></div>';
+				$('#messages').append(li);
+			}
+
+			const [nIndex, timed] = gMultipartIndex[get_uniq(dict, channel)];
+			gMultipartDict[get_uniq(dict, channel)][numIndex - nIndex] = message;
+
 			if (!isLast) {
 				return 0;
 			}
+
 			message = "";
-			for (let i = 0; i <= numIndex; i++) {
-				message += gMultipartDict[get_uniq(uid, channel)][i];
+			for (let i = 0; i <= numIndex - nIndex; i++) {
+				const frag = gMultipartDict[get_uniq(dict, channel)][i];
+				if (!frag) {
+					//lost message, ignore image
+					console.log("Lost multipart: " +i);
+					gMultipartDict[get_uniq(dict, channel)] = null;
+					gMultipartIndex[get_uniq(dict, channel)] = null;
+					return 0;
+				}
+				message += frag;
 			}
-			gMultipartDict[get_uniq(uid, channel)] = null;
+			if (!fsEnabled) {
+				if (uid != gMyName) {
+					li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="new"><span class="name">' + uid + '</span> ' + timed +
+						'<img class="image" src="' + message + '" height="' + IMG_THUMBSZ + 'px" data-action="zoom" alt="">';
+
+				}
+				else {
+					li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="own"> ' + timed
+						+ '<img class="image" src="' + message + '" height="' + IMG_THUMBSZ + 'px" data-action="zoom" alt="">';
+
+				}
+			} else {
+				if (uid != gMyName) {
+					li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="new"><span class="name">' + uid + '</span><font color="' + FSFONTCOLOR + '"> ' + timed +
+						'</font><img class="image" src="' + message + '" height="' + IMG_THUMBSZ + 'px" data-action="zoom" alt="">';
+
+				}
+				else {
+					li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="own"><font color="' + FSFONTCOLOR + '"> ' + timed
+						+ '</font><img class="image" src="' + message + '" height="' + IMG_THUMBSZ + 'px" data-action="zoom" alt="">';
+
+				}
+			}
+			li += '</li></div>';
+			$('#' + duid + '' + nIndex.toString(16)).replaceWith(li);
+
+			gMultipartDict[get_uniq(dict, channel)] = null;
+			gMultipartIndex[get_uniq(dict, channel)] = null;
+
+			finalize(uid, channel, msgTimestamp, message, isFull, isImage);
 		}
-		else
-			return 0;
+		return 0;
 	}
 
 	if (isFull && 0 == message.length) /* Ignore init messages in timestamp processing */
 		return 0;
 
-	if (isMultipart || msgHashHandle(uid, channel, msgTimestamp, mHash)) {
+	if (msgHashHandle(uid, channel, msgTimestamp, mHash)) {
 		let date;
 		let time;
 		let li;
@@ -707,38 +771,22 @@ async function processData(uid, channel, msgTimestamp,
 		}
 		time = updateTime(dateString);
 
-		/* Check first is it a text or image */
-		if (isImage) {
+		if(!fsEnabled) {
 			if (uid != gMyName) {
-				li = '<div id="' + duid + '' + gIdHash[duid] + '"><li class="new"><span class="name">' + uid + '</span> ' + time +
-					'<img class="image" src="' + message + '" height="100px" data-action="zoom" alt="">';
-
+				li = '<div id="' + duid + '' + gIdHash[duid] + '"><li class="new"><span class="name"> ' + uid + '</span> '
+					+ time + "" + autolinker.link(message) + '</li></div>';
 			}
 			else {
-				li = '<div id="' + duid + '' + gIdHash[duid] + '"><li class="own"> ' + time
-					+ '<img class="image" src="' + message + '" height="100px" data-action="zoom" alt="">';
-
+				li = '<div id="' + duid + '' + gIdHash[duid] + '"><li class="own"> ' + time + "" + autolinker.link(message) + '</li></div>';
 			}
-			li += '</li></div>';
 		}
 		else {
-			if(!fsEnabled) {
-				if (uid != gMyName) {
-					li = '<div id="' + duid + '' + gIdHash[duid] + '"><li class="new"><span class="name"> ' + uid + '</span> '
-						+ time + "" + autolinker.link(message) + '</li></div>';
-				}
-				else {
-					li = '<div id="' + duid + '' + gIdHash[duid] + '"><li class="own"> ' + time + "" + autolinker.link(message) + '</li></div>';
-				}
+			if (uid != gMyName) {
+				li = '<div id="' + duid + '' + gIdHash[duid] + '"><li class="new"><span class="name"> ' + uid + '</span> '
+					+ time + '<font color="' + FSFONTCOLOR + '">' + autolinker.link(message) + '</font></li></div>';
 			}
 			else {
-				if (uid != gMyName) {
-					li = '<div id="' + duid + '' + gIdHash[duid] + '"><li class="new"><span class="name"> ' + uid + '</span> '
-						+ time + '<font color="' + FSFONTCOLOR + '">' + autolinker.link(message) + '</font></li></div>';
-				}
-				else {
-					li = '<div id="' + duid + '' + gIdHash[duid] + '"><li class="own"> ' + time + '<font color="' + FSFONTCOLOR + '">' + autolinker.link(message) + '</font></li></div>';
-				}
+				li = '<div id="' + duid + '' + gIdHash[duid] + '"><li class="own"> ' + time + '<font color="' + FSFONTCOLOR + '">' + autolinker.link(message) + '</font></li></div>';
 			}
 		}
 
@@ -757,31 +805,15 @@ async function processData(uid, channel, msgTimestamp,
 			}
 		}
 
-		if (isFull || $('#input_message').val().length == 0) {
-			scrollToBottom();
-		}
-
-		const notifyTimestamp = parseInt(msgTimestamp/1000/60); //one notify per minute
-		if (uid != gMyName && isFull && gIdNotifyTs[get_uniq(uid, channel)] < notifyTimestamp) {
-			if (gWillNotify && gCanNotify) {
-				if (true == isImage) {
-					message = gImageStr;
-				}
-				doNotify(uid, channel, notifyTimestamp, message);
-			}
-			gIdNotifyTs[get_uniq(uid, channel)] = notifyTimestamp;
-		}
+		finalize(uid, channel, msgTimestamp, message, isFull, isImage);
 	}
 	return 0;
 }
 
-function processSend(uid, channel, isMultipart) {
-	if (isMultipart) {
-		if (gMultipartSendDict[get_uniq(uid, channel)]) {
-			gMultipartContinue = true;
-		}
+function finalize(uid, channel, msgTimestamp, message, isFull, isImage) {
+	if(isFull || 0 == $('#input_message').val().length) {
+		scrollToBottom(channel);
 	}
-	return 0;
 }
 
 function processClose(uid, channel, mychan) {
@@ -830,18 +862,6 @@ gWebWorker.onmessage = function (e) {
 					fsEnabled);
 				if (ret < 0) {
 					console.log("Process data failed: " + ret);
-				}
-			}
-			break;
-		case "send":
-			{
-				let uid = e.data[1];
-				let channel = e.data[2];
-				let isMultipart = e.data[3];
-
-				let ret = processSend(uid, channel, isMultipart);
-				if (ret < 0) {
-					console.log("Process send failed: " + ret);
 				}
 			}
 			break;
@@ -1047,91 +1067,6 @@ function sendMessage(message, isFull, isPresence, isPresenceAck = false) {
 	msgtype |= (isPresence ? MSGISPRESENCE : 0);
 	msgtype |= (isPresenceAck ? MSGISPRESENCEACK : 0);
 	sendData("send", gMyName, gMyChannel, message, msgtype);
-}
-
-async function sendDataurl(dataUrl, uid, channel) {
-	let msgtype = MSGISFULL|MSGISIMAGE;
-
-	if (dataUrl.length > MULTIPART_SLICE) {
-		msgtype |= MSGISMULTIPART;
-		gMultipartSendDict[get_uniq(uid, channel)] = true;
-		for (let i = 0; i < dataUrl.length; i += MULTIPART_SLICE) {
-			let data = "";
-			if(i/MULTIPART_SLICE < 10)
-				data += "000";
-			else if(i/MULTIPART_SLICE < 100)
-				data += "00";
-			else if(i/MULTIPART_SLICE < 1000)
-				data += "0";
-			data += (i/MULTIPART_SLICE).toString();
-			//console.log("Adding image index " + data);
-			if (0 == i) {
-				msgtype |= MSGISFIRST;
-			}
-			else if (i + MULTIPART_SLICE >= dataUrl.length) {
-				data += dataUrl.slice(i, dataUrl.length);
-				let data = dataUrl.slice(i, dataUrl.length);
-				sendData("send", gMyName, gMyChannel, data, msgtype);
-				gMultipartSendDict[get_uniq(uid, channel)] = false;
-				gMultipartContinue = false;
-				break;
-			}
-			data += dataUrl.slice(i, i + MULTIPART_SLICE);
-			sendData("send", gMyName, gMyChannel, data, msgtype);
-			while (false == gMultipartContinue) {
-				await sleep(ASYNC_SLEEP);
-			}
-			gMultipartContinue = false;
-		}
-	}
-	else {
-		sendData("send", gMyName, gMyChannel, dataUrl, msgtype); /* is not multipart */
-	}
-
-	updateAfterSend(dataUrl, true, true);
-}
-
-
-function sendImage(file) {
-	let fr = new FileReader();
-	fr.onload = function (readerEvent) {
-		if (file.size >= IMGFRAGSIZE) {
-			let imgtype = 'image/jpeg';
-			if (file.type.match('image/png')) {
-				imgtype = 'image/png';
-			}
-			//resize the image
-			let image = new Image();
-			image.onload = function (imageEvent) {
-				let canvas = document.createElement('canvas'),
-					max_size = IMGMAXSIZE,
-					width = image.width,
-					height = image.height;
-				if (width > height) {
-					if (width > max_size) {
-						height *= max_size / width;
-						width = max_size;
-					}
-				} else {
-					if (height > max_size) {
-						width *= max_size / height;
-						height = max_size;
-					}
-				}
-				canvas.width = width;
-				canvas.height = height;
-				canvas.getContext('2d').drawImage(image, 0, 0, width, height);
-				let dataUrl = canvas.toDataURL(imgtype);
-				sendDataurl(dataUrl, gMyName, gMyChannel);
-			}
-			image.src = readerEvent.target.result;
-		}
-		else {
-			//send directly without resize
-			sendDataurl(fr.result, gMyName, gMyChannel);
-		}
-	}
-	fr.readAsDataURL(file);
 }
 
 function getToken() {
