@@ -803,7 +803,12 @@ function processInit(uid, channel, mychan) {
 
 function createSipToken(channel) {
 	//use channel to create 128 bit key
-	let bfchannel = atob(channel);
+	let len;
+	if(channel.length > 16)
+		len = 16;
+	else
+		len = channel.length;
+	let bfchannel = channel.substring(0, len);
 	gSipKey[channel] = SipHash.string16_to_key(bfchannel);
 	gSipKeyChan[channel] = bfchannel;
 }
