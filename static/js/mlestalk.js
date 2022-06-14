@@ -494,7 +494,6 @@ function askChannelNew() {
 		let bfchannel = channel.substring(0,len);
 		let sipkey = SipHash.string16_to_key(bfchannel);
 		let atoken = SipHash.hash_hex(sipkey, bfchannel);
-		atoken = atoken + bfchannel;
 		atoken = btoa(atoken);
 		let ntoken = token.trim();
 		if (atoken != ntoken) {
