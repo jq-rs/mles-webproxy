@@ -780,7 +780,7 @@ function initReconnect(channel) {
 function processInit(uid, channel, mychan) {
 	if (uid.length > 0 && channel.length > 0) {
 		gInitOk[channel] = true;
-		createSipToken(channel, mychan);
+		createSipToken(channel);
 		//if(gActiveChannel == channel)
 		//	selectSipToken(channel);
 
@@ -822,7 +822,6 @@ function createSipToken(channel) {
 function selectSipToken(channel) {
 	if(gSipKey[channel] && gSipKeyChan[channel]) {
 		let atoken = SipHash.hash_hex(gSipKey[channel], gSipKeyChan[channel]);
-		atoken = atoken + gSipKeyChan[channel];
 		let token = btoa(atoken);
 		document.getElementById("qrcode_link").setAttribute("href", getToken(channel, token));
 		qrcode.clear(); // clear the code.
