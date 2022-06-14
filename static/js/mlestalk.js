@@ -485,7 +485,13 @@ function askChannelNew() {
 	}
 	else {
 		let channel = $('#input_channel').val().trim();
-		let bfchannel = atob(channel);
+		let len;
+
+		if(channel.length > 16)
+			len = 16;
+		else
+			len = channel.length;
+		let bfchannel = channel.substring(0,len);
 		let sipkey = SipHash.string16_to_key(bfchannel);
 		let atoken = SipHash.hash_hex(sipkey, bfchannel);
 		atoken = atoken + bfchannel;
