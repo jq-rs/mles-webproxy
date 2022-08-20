@@ -108,7 +108,6 @@ gWeekday[5] = "Fri";
 gWeekday[6] = "Sat";
 let gBgTitle = "MlesTalk in the background";
 let gBgText = "Notifications active";
-let gImageStr = "<an image>";
 
 const FSFONTCOLOR = "#8bac89";
 
@@ -886,10 +885,12 @@ function checkTime(uid, channel, time, isFull) {
 }
 
 function processData(uid, channel, msgTimestamp,
-		message, isFull, isPresence, isPresenceAck, presAckRequired, isImage,
+		message, isFull, isPresence, isPresenceAck, presAckRequired, isData,
 		isMultipart, isFirst, isLast, fsEnabled)
 {
 
+	let isAudio = false;
+	let isImage = false;
 	//update hash
 	let duid = get_duid(uid, channel);
 	if(!gIndex[channel])
@@ -1006,29 +1007,70 @@ function processData(uid, channel, msgTimestamp,
 				}
 				message += frag;
 			}
-			if (!fsEnabled) {
-				if (uid != gMyName[channel]) {
-					li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="new"><span class="name">' + uid + '</span> ' + time +
-						'<img class="image" src="' + message + '" height="' + IMG_THUMBSZ + 'px" data-action="zoom" alt="">';
 
+			//match data types
+			if(message.substring(0,AUDIODATASTR.length) == AUDIODATASTR) {
+				isAudio = true;
+				if (!fsEnabled) {
+					if (uid != gMyName[channel]) {
+						li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="new"><span class="name">' + uid + '</span> ' + time +
+							'🎙 <audio controls src="' + message + '" />';
+
+					}
+					else {
+						li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="own"> ' + time +
+							'🎙 <audio controls src="' + message + '" />';
+
+					}
+				} else {
+					if (uid != gMyName[channel]) {
+						li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="new"><span class="name">' + uid + '</span><font color="' + FSFONTCOLOR + '"> ' + time +
+							'🎙 <audio controls src="' + message + '" />'
+							+ '</font>';
+
+					}
+					else {
+						li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="own"><font color="' + FSFONTCOLOR + '"> ' + time
+							'🎙 <audio controls src="' + message + '" />'
+							+ '</font>';
+					}
 				}
-				else {
-					li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="own"> ' + time
-						+ '<img class="image" src="' + message + '" height="' + IMG_THUMBSZ + 'px" data-action="zoom" alt="">';
-
-				}
-			} else {
-				if (uid != gMyName[channel]) {
-					li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="new"><span class="name">' + uid + '</span><font color="' + FSFONTCOLOR + '"> ' + time +
-						'</font><img class="image" src="' + message + '" height="' + IMG_THUMBSZ + 'px" data-action="zoom" alt="">';
-
-				}
-				else {
-					li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="own"><font color="' + FSFONTCOLOR + '"> ' + time
-						+ '</font><img class="image" src="' + message + '" height="' + IMG_THUMBSZ + 'px" data-action="zoom" alt="">';
-
+				if(gActiveChannel == channel && false == gIsPause) {
+					let audio = new Audio(message);
+					audio.loop = false;
+					audio.play();
 				}
 			}
+			else if(message.substring(0,IMGDATASTR.length) == IMGDATASTR) {
+				isImage = true;
+				if (!fsEnabled) {
+					if (uid != gMyName[channel]) {
+						li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="new"><span class="name">' + uid + '</span> ' + time +
+							'<img class="image" src="' + message + '" height="' + IMG_THUMBSZ + 'px" data-action="zoom" alt="">';
+
+					}
+					else {
+						li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="own"> ' + time
+							+ '<img class="image" src="' + message + '" height="' + IMG_THUMBSZ + 'px" data-action="zoom" alt="">';
+
+					}
+				} else {
+					if (uid != gMyName[channel]) {
+						li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="new"><span class="name">' + uid + '</span><font color="' + FSFONTCOLOR + '"> ' + time +
+							'</font><img class="image" src="' + message + '" height="' + IMG_THUMBSZ + 'px" data-action="zoom" alt="">';
+
+					}
+					else {
+						li = '<div id="' + duid + '' + nIndex.toString(16) + '"><li class="own"><font color="' + FSFONTCOLOR + '"> ' + time
+							+ '</font><img class="image" src="' + message + '" height="' + IMG_THUMBSZ + 'px" data-action="zoom" alt="">';
+
+					}
+				}
+			}
+			else { //unknown data type, ignore
+				return 0;
+			}
+
 			li += '</li></div>';
 			if(gActiveChannel == channel) {
 				$('#' + duid + '' + nIndex.toString(16)).replaceWith(li);
@@ -1046,7 +1088,7 @@ function processData(uid, channel, msgTimestamp,
 			gMultipartDict[get_uniq(dict, channel)] = null;
 			gMultipartIndex[get_uniq(dict, channel)] = null;
 
-			finalize(uid, channel, msgTimestamp, message, isFull, isImage);
+			finalize(uid, channel, msgTimestamp, message, isFull, isImage, isAudio);
 		}
 		return 0;
 	}
@@ -1123,12 +1165,12 @@ function processData(uid, channel, msgTimestamp,
 			gIdAppend[channel][uid] = false;
 		}
 
-		finalize(uid, channel, msgTimestamp, message, isFull, isImage);
+		finalize(uid, channel, msgTimestamp, message, isFull, isImage, isAudio);
 	}
 	return 0;
 }
 
-function finalize(uid, channel, msgTimestamp, message, isFull, isImage) {
+function finalize(uid, channel, msgTimestamp, message, isFull, isImage, isAudio) {
 	if(gActiveChannel == channel && (isFull || 0 == $('#input_message').val().length)) {
 		//if user has scrolled, do not scroll to bottom unless full message
 		if(messages_list.scrollTop >= gPrevScrollTop[channel]-200) { //webview is not accurate in scrolltop
@@ -1153,8 +1195,10 @@ function finalize(uid, channel, msgTimestamp, message, isFull, isImage) {
 	{
 		if(gActiveChannel != channel || gIsPause) {
 			if (gWillNotify && gCanNotify) {
-				if(isImage)
-					message = gImageStr;
+				if(isAudio)
+					message = "🎙";
+				else if(isImage)
+					message = "🖼️";
 				doNotify(uid, channel, notifyTimestamp, message);
 			}
 		}
@@ -1385,7 +1429,7 @@ function sendData(cmd, uid, channel, data, msgtype) {
 	}
 }
 
-function updateAfterSend(channel, message, isFull, isImage) {
+function updateAfterSend(channel, message, isFull, isImage, isAudio) {
 	let dateString = "[" + timeNow() + "] ";
 	let date = updateDateval(channel, dateString);
 	let time = updateTime(dateString);
@@ -1411,6 +1455,14 @@ function updateAfterSend(channel, message, isFull, isImage) {
 		}
 		else {
 			li = '<div id="owner' + gOwnId[channel] + '"><li class="own"><font color="' + FSFONTCOLOR + '"> ' + time + '' + autolinker.link(message) + '</font></li></div>';
+		}
+	}
+	else if(isAudio) {
+		if (!gForwardSecrecy[channel]) {
+			li = '<div id="owner' + gOwnId[channel] + '"><li class="own"> ' + time + '🎙 <audio controls src="' + message + '" /></li></div>';
+		}
+		else {
+			li = '<div id="owner' + gOwnId[channel] + '"><li class="own"><font color="' + FSFONTCOLOR + '"> ' + time + '🎙 <audio controls src="' + message + '" /></font></li></div>';
 		}
 	}
 	else {
@@ -1491,8 +1543,11 @@ async function sendDataurlMulti(dataUrl, uid, channel, image_hash) {
 }
 
 
-async function sendDataurl(dataUrl, uid, channel) {
+function sendDataurl(dataUrl, uid, channel) {
 	const msgtype = MSGISFULL | MSGISIMAGE | MSGISMULTIPART | MSGISFIRST;
+
+	if(!gSipKey[channel])
+		return 0;
 
 	if(!gImageCnt) {
 		gImageCnt = SipHash.hash_uint(gSipKey[channel], uid + Date.now());
@@ -1506,8 +1561,7 @@ async function sendDataurl(dataUrl, uid, channel) {
 	data += dataUrl.slice(0, 1);
 	sendData("send", gMyName[channel], gMyChannel[channel], data, msgtype);
 	sendDataurlMulti(dataUrl, uid, channel, image_hash);
-
-	updateAfterSend(channel, dataUrl, true, true);
+	return 1;
 }
 
 
@@ -1515,10 +1569,6 @@ function sendImage(channel, file) {
 	let fr = new FileReader();
 	fr.onload = function (readerEvent) {
 		if (file.size >= IMGFRAGSIZE) {
-			let imgtype = 'image/jpeg';
-			if (file.type.match('image/png')) {
-				imgtype = 'image/png';
-			}
 			//resize the image
 			let image = new Image();
 			image.onload = function (imageEvent) {
@@ -1540,14 +1590,16 @@ function sendImage(channel, file) {
 				canvas.width = width;
 				canvas.height = height;
 				canvas.getContext('2d').drawImage(image, 0, 0, width, height);
-				let dataUrl = canvas.toDataURL(imgtype);
-				sendDataurl(dataUrl, gMyName[channel], gMyChannel[channel]);
+				let dataUrl = canvas.toDataURL(file.type);
+				if(sendDataurl(dataUrl, gMyName[channel], gMyChannel[channel]))
+					updateAfterSend(channel, dataUrl, true, true, false);
 			}
 			image.src = readerEvent.target.result;
 		}
 		else {
 			//send directly without resize
-			sendDataurl(fr.result, gMyName[channel], gMyChannel[channel]);
+			if(sendDataurl(fr.result, gMyName[channel], gMyChannel[channel]))
+				updateAfterSend(channel, fr.result, true, true, false);
 		}
 	}
 	fr.readAsDataURL(file);
