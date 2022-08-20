@@ -38,6 +38,8 @@ const MSGPRESACKREQ = (0x1 << 7);
 const MSGISBDONE = (0x1 << 8);
 const MSGISBDACK = (0x1 << 9);
 const HDRLEN = 48;
+const AUDIODATASTR = "data:audio/webm";
+const IMGDATASTR = "data:image";
 
 const DATESTART = '<li class="date">';
 
