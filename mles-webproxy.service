@@ -6,6 +6,7 @@ WorkingDirectory = /home/ubuntu/www/mles-webproxy
 ExecStart = /home/ubuntu/www/mles-webproxy/mles-webproxy-manage.sh start
 ExecStop = /home/ubuntu/www/mles-webproxy/mles-webproxy-manage.sh stop
 Restart=always
+StandardOutput=null
 
 [Install]
 WantedBy=multi-user.target
