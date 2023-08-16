@@ -17,6 +17,84 @@
 <div class="container">
 <div id="bwidth">
 <img src="images/mles_logo_final.png" alt="Mles logo" width="100" />
+<h2>Path to Mles v2.0 - Message structure changes</h2>
+
+<p><b>jq-rs, 17.8.2023. Cross-posted from <a href="https://lemmy.world/c/mles/">/c/mles</a></b></p>
+
+<pre>
+Mles originates from October 2016 and the Mles message structure has been the following since the v1.0 release
+
+    0                   1                   2                   3
+    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   | ASCII 'M'(77) |            Encapsulated data length           |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |            CID (lowest 4 bytes of initial SipHash)            |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                                                               |
+   +                          SipHash                              +
+   |                                                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |         CBOR encapsulated data (uid, channel, message)        |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+It had pretty modern aspects included such as
+
+    * Large data length support, up to 16 MB framing
+    * SipHash authentication
+    * CID handling with peer servers
+    * CBOR
+
+Even though it has served well for almost a decade now, there exist certain issues with it as an open Internet protocol header, such as a) Framing does not have a checksum b) The default SipHash authentication does not work really for connections behind NAT c) CBOR d) Header overhead
+
+Let’s check the above cases in detail.
+
+a) Why would we need a checksum over TCP you may ask? Well, you do not need it for data for sure, TCP has one already. Nevertheless, the server side has use for it to identify and drop false random-data bot-connections. And there are often a lot of them, which just happen to start with ASCII 77.
+
+b) Yes, the SipHash did a good job authenticating the TCP endpoints. Unfortunately, behind a NAT the client cannot really know its IP, so shared key was in the end the only working solution for IPv4 servers.
+
+c) CBOR as an (IETF) format sounds nice, but in practice is awkward to both implement and use. It does not really save that much space compared to e.g. JSON, it cannot be easily read on the captures and the most popular crate is now deprecated.
+
+d) Header overhead is pretty extensive for very short messages. The specification says that the use of SipHash can be ignored, but still needs the header fields and CBOR structures for every frame. Do we really need them, every time?
+
+You may have encountered or noticed other issues too regarding the message structure. If so, please let me know, let’s fix it.
+
+Regarding the above issues, what would be the concept for the next-generation message structure then? Perhaps not that different, to be honest, see below draft:
+
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   | ASCII 'N'(78) |                  Data length                  |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                                                               |
+   +                          SipHash                              +
+   |                                                               |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |           JSON encapsulated id data (uid, channel)            |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+Even though the fields are quite the same, the way we use them will be different and hopefully will solve all of the above issues:
+
+a) The SipHash field will include the header as well and therefore be the checksum for it. The weak dependency on CID will be removed, obviously, as there is no CID anymore, the SipHash is the CID.
+
+b) The SipHash authentication for IP endpoints will be dropped. A shared key can still be part of SipHash authentication, by default the header + the channel are the authentication.
+
+c) Let’s drop CBOR and use JSON. And especially, let’s not encapsulate the data into JSON. JSON is supported everywhere and is easy for client implementation.
+
+d) After the first initial frame, the connection is authenticated and identified, we do not need the SipHash or JSON anymore. The next frames will use the following format:
+
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   | ASCII 'N'(78) |                  Data length                  |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+   |                       Data (raw bytes) ...                    |
+   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+The first frame cannot hold more data than the JSON identifiers, but after that avoid all the overhead with only 4 byte TLV structure for framing.
+
+That’s it for this time! This is all draft and you are free to comment, thanks in advance! The presented changes will certainly cause changes to other areas of the protocol. What they are, we check in detail next time. See you then!
+</pre>
+</div>
+</div>
+<div class="container">
+<div id="bwidth">
 <h2>A new, alternative 2nd layer protocol implementation available</h2>
 
 <p><b>jq-rs, 6.11.2022</b></p>
