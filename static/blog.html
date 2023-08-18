@@ -83,12 +83,10 @@ c) Let’s drop CBOR and use JSON. And especially, let’s not encapsulate the d
 d) After the first initial frame, the connection is authenticated and identified, we do not need the SipHash or JSON anymore. The next frames will use the following format:<br />
 <pre>
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   | ASCII 'N'(78) |                  Data length                  |
-   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
    |                       Data (raw bytes) ...                    |
    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 </pre>
-The first frame cannot hold more data than the JSON identifiers, but after that avoid all the overhead with only 4 byte TLV structure for framing.<br />
+The first frame cannot hold more data than the JSON identifiers, but after that avoid we all the overhead allowing the application to decide the framing.<br />
 
 That’s it for this time! This is all draft and you are free to comment, thanks in advance! The presented changes will certainly cause changes to other areas of the protocol. What they are, we check in detail next time. See you then!<br />
 </div>
