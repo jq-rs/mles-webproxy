@@ -11,6 +11,7 @@ use std::net::Ipv6Addr;
 use std::path::PathBuf;
 use tokio_stream::wrappers::TcpListenerStream;
 use warp::Filter;
+use futures_util::{FutureExt, StreamExt};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -41,7 +42,7 @@ const ACCEPTED_PROTOCOL: &str = "mles-websocket";
 async fn main() {
     //simple_logger::init_with_level(log::Level::Info).unwrap();
     let args = Args::parse();
-    let mut www_root_dir = "static/".to_string();
+    let mut www_root_dir = "/home/ubuntu/www/mles-webproxy/static".to_string();
     let srv_addr = "mles.io:8077";
 
     let tcp_listener = tokio::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, args.port)).await.unwrap();
@@ -62,8 +63,16 @@ async fn main() {
         .map(move |ws: warp::ws::Ws| {
             //let srv_addr = srv_addr_inner.clone();
             // And then our closure will be called when it completes...
-            println!("Run proxy!");
-            //ws.on_upgrade(move |_websocket| println!("Run proxy here!"))//run_websocket_proxy(websocket, &srv_addr))
+            ws.on_upgrade(|websocket| {
+                // Just echo all messages back...
+                println!("Listening mles-websocket...");
+                let (tx, rx) = websocket.split();
+                rx.forward(tx).map(|result| {
+                    if let Err(e) = result {
+                        eprintln!("websocket error: {:?}", e);
+                    }
+                })
+            })
         })
         .with(warp::reply::with::header(
             "Sec-WebSocket-Protocol",
