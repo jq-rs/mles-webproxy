@@ -40,7 +40,7 @@ const ACCEPTED_PROTOCOL: &str = "mles-websocket";
 
 #[tokio::main]
 async fn main() {
-    //simple_logger::init_with_level(log::Level::Info).unwrap();
+    simple_logger::init_with_level(log::Level::Info).unwrap();
     let args = Args::parse();
     let mut www_root_dir = "/home/ubuntu/www/mles-webproxy/static".to_string();
     let srv_addr = "mles.io:8077";
