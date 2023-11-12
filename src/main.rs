@@ -27,6 +27,10 @@ struct Args {
     #[clap(short, parse(from_os_str))]
     cache: Option<PathBuf>,
 
+    /// Www-root directory
+    #[clap(short, parse(from_os_str), required = true)]
+    wwwroot: Option<PathBuf>,
+
     /// Use Let's Encrypt production environment
     /// (see https://letsencrypt.org/docs/staging-environment/)
     #[clap(long)]
@@ -42,8 +46,6 @@ const ACCEPTED_PROTOCOL: &str = "mles-websocket";
 async fn main() {
     simple_logger::init_with_level(log::Level::Info).unwrap();
     let args = Args::parse();
-    let mut www_root_dir = "/home/ubuntu/www/mles-webproxy/static".to_string();
-    let srv_addr = "mles.io:8077";
 
     let tcp_listener = tokio::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, args.port)).await.unwrap();
     let tcp_incoming = TcpListenerStream::new(tcp_listener);
@@ -54,6 +56,7 @@ async fn main() {
         .directory_lets_encrypt(args.prod)
         .tokio_incoming(tcp_incoming, Vec::new());
 
+    let www_root_dir = args.wwwroot;
     let index = warp::fs::dir(www_root_dir);
     let ws = warp::ws()
         .and(warp::header::exact(
@@ -61,12 +64,18 @@ async fn main() {
                 ACCEPTED_PROTOCOL,
                 ))
         .map(move |ws: warp::ws::Ws| {
-            //let srv_addr = srv_addr_inner.clone();
-            // And then our closure will be called when it completes...
             ws.on_upgrade(|websocket| {
                 // Just echo all messages back...
                 println!("Listening mles-websocket...");
                 let (tx, rx) = websocket.split();
+                /* TODO
+                 * 1. Parse mles-websocket JSON format
+                 * 2. If valid, create a siphash id and add to hashmap
+                 * 3. Send message history to receiver
+                 * 4. Add message to message history
+                 * 5. Forward to other ids
+                 * 6. Start forwarding messages back and forth 4->5 in its own task
+                 */
                 rx.forward(tx).map(|result| {
                     if let Err(e) = result {
                         eprintln!("websocket error: {:?}", e);
