@@ -12,6 +12,14 @@ use std::path::PathBuf;
 use tokio_stream::wrappers::TcpListenerStream;
 use warp::Filter;
 use futures_util::{FutureExt, StreamExt};
+use serde::{Deserialize, Serialize};
+use serde_json::Result;
+
+#[derive(Serialize, Deserialize)]
+struct MlesHeader {
+    uid: String,
+    channel: String,
+}
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -29,7 +37,7 @@ struct Args {
 
     /// Www-root directory
     #[clap(short, parse(from_os_str), required = true)]
-    wwwroot: Option<PathBuf>,
+    wwwroot: PathBuf,
 
     /// Use Let's Encrypt production environment
     /// (see https://letsencrypt.org/docs/staging-environment/)
@@ -67,7 +75,26 @@ async fn main() {
             ws.on_upgrade(|websocket| {
                 // Just echo all messages back...
                 println!("Listening mles-websocket...");
-                let (tx, rx) = websocket.split();
+                let (tx, mut rx) = websocket.split();
+                async move {
+                    if let Some(Ok(msg)) = rx.next().await {
+                        println!("Got hdr msg {:?}", msg);
+                        if !msg.is_text() {
+                            println!("Invalid msg, returning");
+                            return ();
+                        }
+                        let msghdr: Result<MlesHeader> = serde_json::from_str(msg.to_str().unwrap());
+                        match msghdr {
+                            Ok(msghdr) => println!("Got fine msghdr!"),
+                            Err(_) => ()
+                        }
+                        while let Some(Ok(msg)) = rx.next().await {
+                            println!("Got msg {:?}", msg);
+                        }
+                    }
+                    println!("Returning...");
+                    ()
+                }
                 /* TODO
                  * 1. Parse mles-websocket JSON format
                  * 2. If valid, create a siphash id and add to hashmap
@@ -76,11 +103,11 @@ async fn main() {
                  * 5. Forward to other ids
                  * 6. Start forwarding messages back and forth 4->5 in its own task
                  */
-                rx.forward(tx).map(|result| {
-                    if let Err(e) = result {
-                        eprintln!("websocket error: {:?}", e);
-                    }
-                })
+                //rx.forward(tx).map(|result| {
+                //    if let Err(e) = result {
+                //        eprintln!("websocket error: {:?}", e);
+                //    }
+                //;
             })
         })
         .with(warp::reply::with::header(
