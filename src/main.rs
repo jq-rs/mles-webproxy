@@ -14,6 +14,9 @@ use warp::Filter;
 use futures_util::{FutureExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Result;
+use std::sync::{Arc,Mutex};
+use std::collections::HashMap;
+use siphasher::sip::SipHasher;
 
 #[derive(Serialize, Deserialize)]
 struct MlesHeader {
@@ -54,6 +57,7 @@ const ACCEPTED_PROTOCOL: &str = "mles-websocket";
 async fn main() {
     simple_logger::init_with_level(log::Level::Info).unwrap();
     let args = Args::parse();
+    let db = Arc::new(Mutex::new(HashMap::new()));
 
     let tcp_listener = tokio::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, args.port)).await.unwrap();
     let tcp_incoming = TcpListenerStream::new(tcp_listener);
@@ -85,7 +89,23 @@ async fn main() {
                         }
                         let msghdr: Result<MlesHeader> = serde_json::from_str(msg.to_str().unwrap());
                         match msghdr {
-                            Ok(msghdr) => println!("Got fine msghdr!"),
+                            Ok(msghdr) => {
+                                println!("Got fine msghdr!");
+                                let hasher = SipHasher::new();
+                                let h = hasher.hash(msghdr.channel.as_bytes());
+                                println!("Got hash {}", h);
+                                {
+                                    let mut db = db.lock().unwrap();
+                                    if !db.contains_key(&h) {
+                                        let tc_new = vec![tx];
+                                        db.insert(h, tc_new);
+                                    }
+                                    else {
+                                        let mut tc_vec = db.get_mut(&h).unwrap();
+                                        tc_vec.push(tx);
+                                    }
+                                }
+                            }
                             Err(_) => ()
                         }
                         while let Some(Ok(msg)) = rx.next().await {
