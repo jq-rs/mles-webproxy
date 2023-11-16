@@ -11,18 +11,24 @@ use std::net::Ipv6Addr;
 use std::path::PathBuf;
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::Sender;
 use warp::Filter;
+use warp::Error;
 use warp::ws::Message;
-//use futures_util::{FutureExt, StreamExt, SinkExt};
 use futures_util::{StreamExt, SinkExt};
+use futures_util::FutureExt;
 use serde::{Deserialize, Serialize};
-use serde_json::Result;
+//use serde_json::Result;
 use std::sync::{Arc,Mutex};
 use std::collections::HashMap;
 use siphasher::sip::SipHasher;
-use core::hash::Hasher;
+use tokio_stream::wrappers::UnboundedReceiverStream;
+use tokio_stream::wrappers::ReceiverStream;
+use futures_util::TryFutureExt;
+use std::hash::{Hash, Hasher};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Hash)]
 struct MlesHeader {
     uid: String,
     channel: String,
@@ -56,13 +62,16 @@ struct Args {
 }
 
 const ACCEPTED_PROTOCOL: &str = "mles-websocket";
+const TASK_BUF: usize = 16;
+const WS_BUF:usize = 128;
 
 #[tokio::main]
 async fn main() {
     simple_logger::init_with_level(log::Level::Info).unwrap();
     let args = Args::parse();
 
-    let (tx, mut rx) = mpsc::channel::<Message>(32);
+    let (tx, rx) = mpsc::channel::<(u64, Sender<Result<Message, warp::Error>>, Result<Message, warp::Error>)>(TASK_BUF);
+    let mut rx = ReceiverStream::new(rx);
     let tcp_listener = tokio::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, args.port)).await.unwrap();
     let tcp_incoming = TcpListenerStream::new(tcp_listener);
 
@@ -73,74 +82,65 @@ async fn main() {
         .tokio_incoming(tcp_incoming, Vec::new());
 
     tokio::spawn(async move {
-        let db = Arc::new(Mutex::new(HashMap::new()));
-        while let Some(msg) = rx.recv().await {
+        let mut db = HashMap::new();
+        while let Some((h, tx2, Ok(msg))) = rx.next().await {
             println!("Got remote message {:?}", msg);
-            {
-                let msghdr: Result<MlesHeader> = serde_json::from_str(msg.to_str().unwrap());
-                match msghdr {
-                    Ok(msghdr) => {
-                        println!("Got fine msghdr!");
-                        let hasher = SipHasher::new();
-                        hasher.write(msghdr.uid.as_bytes());
-                        hasher.write(msghdr.channel.as_bytes());
-                        let h = hasher.finish();
-                        println!("Got hash {}", h);
-                        let mut db = db.lock().unwrap();
-                        if !db.contains_key(&h) {
-                            let msg_vec = vec![msg];
-                            db.insert(h, msg_vec);
-                        }
-                        else {
-                            let mut msg_vec = db.get_mut(&h).unwrap();
-                            msg_vec.push(msg);
-                        }
-                    },
-                    Err(_) => return
-                };
+            if !db.contains_key(&h) {
+                let msg_vec = vec![msg.clone()];
+                db.insert(h, msg_vec);
             }
+            else {
+                let mut msg_vec = db.get_mut(&h).unwrap();
+                msg_vec.push(msg.clone());
+            }
+            tx2.send(Ok(msg)).await;
         }
     });
     
     let www_root_dir = args.wwwroot;
     let index = warp::fs::dir(www_root_dir);
+    let tx_clone = tx.clone();
     let ws = warp::ws()
         .and(warp::header::exact(
                 "Sec-WebSocket-Protocol",
                 ACCEPTED_PROTOCOL,
                 ))
-        .map(move |ws: warp::ws::Ws| {
-            let tx_inner = tx.clone();
+    .map(move |ws: warp::ws::Ws| {
+            let tx_inner = tx_clone.clone();
             ws.on_upgrade(move |websocket| {
-                let tx = tx_inner.clone();
-                // Just echo all messages back...
-                println!("Listening mles-websocket...");
+                let (tx2, rx2) = mpsc::channel::<Result<Message, warp::Error>>(WS_BUF);
+                let mut rx2 = ReceiverStream::new(rx2);
                 let (ws_tx, mut ws_rx) = websocket.split();
+                let tx = tx_inner.clone();
+
+                println!("Listening mles-websocket...");
+
                 tokio::spawn(async move {
-                //async move {
+                    let mut h = 0;
                     if let Some(Ok(msg)) = ws_rx.next().await {
-                        println!("Got hdr msg {:?}", msg);
-                        if !msg.is_text() {
-                            println!("Invalid msg, returning");
-                            return ();
-                        }
-                        let msghdr: Result<MlesHeader> = serde_json::from_str(msg.to_str().unwrap());
+                        let msghdr: Result<MlesHeader, serde_json::Error> = serde_json::from_str(msg.to_str().unwrap());
                         match msghdr {
                             Ok(msghdr) => {
                                 println!("Got fine msghdr!");
-                                tx.send(msg).await;
+                                let mut hasher = SipHasher::new();
+                                msghdr.hash(&mut hasher);
+                                h = hasher.finish();
+                                tx.send((h, tx2.clone(), Ok(msg))).await;
                             },
-                            Err(_) => ()
-                        };
-                        while let Some(Ok(msg)) = ws_rx.next().await {
-                            println!("Got msg {:?}", msg);
-                            tx.send(msg).await;
+                            Err(_) => return
                         }
                     }
-                    //println!("Returning...");
-                    //()
-                //};
+                    while let Some(Ok(msg)) = ws_rx.next().await {
+                        tx.send((h, tx2.clone(), Ok(msg))).await;
+                    }
                 });
+
+                rx2.forward(ws_tx)
+                    .map(|res| {
+                        if let Err(e) = res {
+                            eprintln!("Websocket error: {:?}", e);
+                        }
+                    })
                 /* TODO
                  * 1. Parse mles-websocket JSON format
                  * 2. If valid, create a siphash id and add to hashmap
@@ -149,15 +149,6 @@ async fn main() {
                  * 5. Forward to other ids
                  * 6. Start forwarding messages back and forth 4->5 in its own task
                  */
-                rx.forward(ws_tx).map(|result| {
-                    if let Err(e) = result {
-                        eprintln!("websocket error: {:?}", e);
-                    }
-                })
-                //while let Some((h, msg)) = rx.recv().await {
-                //    println!("Got msg {:?}", msg);
-                //    ws_tx.send(msg).await;
-                //}
             })
         })
         .with(warp::reply::with::header(
