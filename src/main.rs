@@ -13,6 +13,8 @@ use tokio_stream::wrappers::TcpListenerStream;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::mpsc::Sender;
+use tokio::time::Duration;
+use tokio::time;
 use warp::Filter;
 use warp::Error;
 use warp::ws::Message;
@@ -66,6 +68,7 @@ const ACCEPTED_PROTOCOL: &str = "mles-websocket";
 const TASK_BUF: usize = 16;
 const WS_BUF:usize = 128;
 const HISTORY_LIMIT:usize = 3000;
+const PING_INTERVAL:u64 = 12000;
 
 #[derive(Debug)]
 enum WsEvent {
@@ -166,16 +169,22 @@ async fn main() {
                 let (err_tx, err_rx) = oneshot::channel();
                 let mut rx2 = ReceiverStream::new(rx2);
                 let (ws_tx, mut ws_rx) = websocket.split();
-                let h: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
-                let ch: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+                let h = Arc::new(AtomicU64::new(0));
+                let ch = Arc::new(AtomicU64::new(0));
+                let ping_cntr = Arc::new(AtomicU64::new(0));
+                let pong_cntr = Arc::new(AtomicU64::new(0));
 
                 println!("Listening mles-websocket...");
                 let tx = tx_inner.clone();
+                let tx2_inner = tx2.clone();
                 let h_clone = h.clone();
                 let ch_clone = ch.clone();
+                let pong_cntr_clone = pong_cntr.clone();
                 tokio::spawn(async move {
                     let h = h_clone;
                     let ch = ch_clone;
+                    let tx2_spawn = tx2_inner.clone();
+                    let pong_cntr_inner = pong_cntr_clone.clone();
                     if let Some(Ok(msg)) = ws_rx.next().await {
                         if !msg.is_text() {
                             return;
@@ -189,7 +198,7 @@ async fn main() {
                                 h.store(hasher.finish(), Ordering::SeqCst);
                                 let hasher = SipHasher::new();
                                 ch.store(hasher.hash(&msghdr.channel.as_bytes()), Ordering::SeqCst);
-                                tx.send(WsEvent::Init(h.load(Ordering::SeqCst), ch.load(Ordering::SeqCst), tx2, err_tx, msg)).await;
+                                tx.send(WsEvent::Init(h.load(Ordering::SeqCst), ch.load(Ordering::SeqCst), tx2_spawn, err_tx, msg)).await;
                             },
                             Err(_) => return
                         }
@@ -205,7 +214,35 @@ async fn main() {
                         }
                     }
                     while let Some(Ok(msg)) = ws_rx.next().await {
+                        if msg.is_pong() {
+                            let cntr = pong_cntr_inner.fetch_add(1, Ordering::Relaxed);
+                            println!("Pong cntr {cntr}");
+                            continue;
+                        }
                         tx.send(WsEvent::Msg(h.load(Ordering::SeqCst), ch.load(Ordering::SeqCst), msg)).await;
+                    }
+                });
+                
+                let tx2_inner = tx2.clone();
+                let ping_cntr_inner = ping_cntr.clone();
+                let pong_cntr_inner = pong_cntr.clone();
+                tokio::spawn(async move {
+                    let mut interval = time::interval(Duration::from_millis(PING_INTERVAL));
+                    interval.tick().await;
+
+                    let tx2_clone = tx2_inner.clone();
+                    loop {
+                        let ping_cnt = ping_cntr_inner.fetch_add(1, Ordering::Relaxed);
+                        let pong_cnt = pong_cntr_inner.load(Ordering::Relaxed);
+                        if pong_cnt + 1 < ping_cnt {
+                            println!("Dropping inactive TLS connection..");
+                            tx2.send(Ok(Message::close())).await;
+                            break;
+                        }
+                        let tx2 = tx2_clone.clone();
+                        interval.tick().await;
+                        tx2.send(Ok(Message::ping(Vec::new()))).await;
+                        println!("Ping cntr {ping_cnt}");
                     }
                 });
 
