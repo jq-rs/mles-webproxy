@@ -77,6 +77,13 @@ enum WsEvent {
     Logoff(u64, u64)
 }
 
+fn add_message(msg: Message, queue: &mut VecDeque<Message>) {
+    if queue.len() == HISTORY_LIMIT {
+        queue.pop_front();
+    }
+    queue.push_back(msg);
+}
+
 #[tokio::main]
 async fn main() {
     simple_logger::init_with_level(log::Level::Info).unwrap();
@@ -101,7 +108,7 @@ async fn main() {
                 WsEvent::Init(h, ch, tx2, err_tx, msg) => {
                     if !uid_db.contains_key(&(h, ch)) {
                         if !msg_db.contains_key(&ch) {
-                            msg_db.insert(ch, VecDeque::with_capacity(HISTORY_LIMIT));
+                            msg_db.insert(ch, VecDeque::new());
                         }
                         for (_, tx) in &uid_db {
                             tx.send(Ok(msg.clone())).await;
@@ -114,10 +121,7 @@ async fn main() {
                         for qmsg in &mut *queue {
                             tx2.send(Ok(qmsg.clone())).await;
                         }
-                        if queue.len() == HISTORY_LIMIT {
-                            queue.pop_front();
-                        }
-                        queue.push_back(msg);
+                        add_message(msg, queue);
                     }
                 },
                 WsEvent::Msg(h, ch, msg) => {
@@ -125,32 +129,13 @@ async fn main() {
                         tx.send(Ok(msg.clone())).await;
                     }
                     let mut queue = msg_db.get_mut(&ch).unwrap();
-                    if queue.len() == HISTORY_LIMIT {
-                        queue.pop_front();
-                    }
-                    queue.push_back(msg);
+                    add_message(msg, queue);
                 },
                 WsEvent::Logoff(h, ch) => {
                     uid_db.remove(&(h, ch));
                     println!("Removed {h}");
                 },
             }
-            /*println!("Got remote message {:?}", event);
-            if db.contains_key(&h) && tx2.is_some() {
-                let reason = format!("Existing client");
-            }
-            if !db.contains_key(&h) {
-                let err_tx = err_tx.unwrap();
-                err_tx.send(h);
-                //Send history data here
-                let msg_vec = VecDeque::with_capacity(HISTORY_LIMIT);
-                db.insert(h, (tx2, msg_vec));
-            }
-            else {
-                let (_, ref mut msg_vec) = db.get_mut(&h).unwrap();
-                msg_vec.push(msg.clone());
-                //Forward to others here
-            }*/
         }
     });
     
