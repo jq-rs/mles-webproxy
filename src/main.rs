@@ -422,6 +422,8 @@ fn run_websocket_proxy(
     let ws_reader = stream.for_each(move |message: Message| {
         if message.is_pong() {
             let _ = pong_cntr.fetch_add(1, Ordering::Relaxed);
+        } else if message.is_text() {
+            //invalid type, do nothing
         } else {
             let mles_message = message.into_bytes();
             let _ = mles_tx_inner

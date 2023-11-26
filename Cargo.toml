@@ -1,6 +1,6 @@
 [package]
 name = "mles-webproxy"
-version = "0.8.7"
+version = "0.8.8"
 authors = ["jq-rs"]
 edition = "2018"
 
