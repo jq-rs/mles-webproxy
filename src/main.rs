@@ -51,6 +51,10 @@ struct Args {
     #[clap(short, parse(from_os_str))]
     cache: Option<PathBuf>,
 
+    /// History limit
+    #[clap(short, long, default_value = "HISTORY_LIMIT")]
+    limit: usize,
+
     /// Www-root directory
     #[clap(short, parse(from_os_str), required = true)]
     wwwroot: PathBuf,
@@ -77,8 +81,13 @@ enum WsEvent {
     Logoff(u64, u64)
 }
 
-fn add_message(msg: Message, queue: &mut VecDeque<Message>) {
-    if queue.len() == HISTORY_LIMIT {
+fn add_message(msg: Message, limit: usize, queue: &mut VecDeque<Message>) {
+    let len = queue.len();
+    let cap = queue.capacity();
+    if len == cap && cap * 2 >= limit {
+        queue.reserve(limit - queue.capacity())
+    }
+    if len == limit {
         queue.pop_front();
     }
     queue.push_back(msg);
@@ -88,6 +97,7 @@ fn add_message(msg: Message, queue: &mut VecDeque<Message>) {
 async fn main() {
     simple_logger::init_with_level(log::Level::Info).unwrap();
     let args = Args::parse();
+    let limit = args.limit;
 
     let (tx, rx) = mpsc::channel::<WsEvent>(TASK_BUF);
     let mut rx = ReceiverStream::new(rx);
@@ -99,6 +109,7 @@ async fn main() {
         .cache_option(args.cache.clone().map(DirCache::new))
         .directory_lets_encrypt(args.prod)
         .tokio_incoming(tcp_incoming, Vec::new());
+
 
     tokio::spawn(async move {
         let mut msg_db: HashMap<u64, VecDeque<Message>> = HashMap::new();
@@ -121,7 +132,7 @@ async fn main() {
                         for qmsg in &mut *queue {
                             tx2.send(Ok(qmsg.clone())).await;
                         }
-                        add_message(msg, queue);
+                        add_message(msg, limit, queue);
                     }
                 },
                 WsEvent::Msg(h, ch, msg) => {
@@ -129,7 +140,7 @@ async fn main() {
                         tx.send(Ok(msg.clone())).await;
                     }
                     let mut queue = msg_db.get_mut(&ch).unwrap();
-                    add_message(msg, queue);
+                    add_message(msg, limit, queue);
                 },
                 WsEvent::Logoff(h, ch) => {
                     uid_db.remove(&(h, ch));
@@ -140,6 +151,7 @@ async fn main() {
     });
     
     let www_root_dir = args.wwwroot;
+
     let index = warp::fs::dir(www_root_dir);
     let tx_clone = tx.clone();
     let ws = warp::ws()
