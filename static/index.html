@@ -21,6 +21,8 @@
 </div>
 <p><b>Mles</b> (<i>Modern Lightweight channEl Service</i>) is a lightweight, robust and authenticated distributed publish-subscribe data service based on Rust (a safe, concurrent and fast systems language), Tokio (asynchronous networking for Rust) and Serde (serialization framework for Rust). It works seamlessly with IPv4 and IPv6 on TCP, which provides its reliable data transfer backbone on Rust supported platforms, including Linux, macOS and Windows.</p>
 
+<p><i>Notice: Mles protocol version 1.0 is deprecated and will be <b>obsolete from the beginning of the year 2024 in favor of Mles v2</b>.</i></p>
+
 <h2>Why Mles?</h2>
 
 <p>Mles provides a way to build a publish-subscribe service between clients which need a channel to exchange messages on in a reliable manner. Every connection also identifies the channel which provides an easy way for clients to open and close connections without additional messaging: just connect and send, and when done, close the connection. With advanced connection handling on top of Tokio futures, Mles should scale well even with a large number of connections. Clients may choose their internal data structure freely as it is transparent to Mles. Mles relies on a modern authentication mechanism which should perform well even with short inputs. Due to the lightweight design on Rust, the performance of Mles should be an improvement compared to existing options (see Fig. 1).<br />
