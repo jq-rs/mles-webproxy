@@ -5,31 +5,27 @@
  *  Copyright (C) 2023  Mles developers
  */
 use clap::Parser;
+use futures_util::{FutureExt, StreamExt};
 use rustls_acme::caches::DirCache;
 use rustls_acme::AcmeConfig;
-use std::net::Ipv6Addr;
-use std::path::PathBuf;
-use tokio_stream::wrappers::TcpListenerStream;
-use tokio::sync::mpsc;
-use tokio::sync::oneshot;
-use tokio::sync::mpsc::Sender;
-use tokio::time::Duration;
-use tokio::time;
-use warp::Filter;
-use warp::Error;
-use warp::ws::Message;
-use futures_util::{StreamExt, SinkExt};
-use futures_util::FutureExt;
 use serde::{Deserialize, Serialize};
-//use serde_json::Result;
+use siphasher::sip::SipHasher;
 use std::collections::HashMap;
 use std::collections::VecDeque;
-use siphasher::sip::SipHasher;
-use tokio_stream::wrappers::UnboundedReceiverStream;
-use tokio_stream::wrappers::ReceiverStream;
 use std::hash::{Hash, Hasher};
+use std::net::Ipv6Addr;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot;
+use tokio::time;
+use tokio::time::Duration;
+use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::TcpListenerStream;
+use warp::ws::Message;
+use warp::Filter;
 
 #[derive(Serialize, Deserialize, Hash)]
 struct MlesHeader {
@@ -52,7 +48,7 @@ struct Args {
     cache: Option<PathBuf>,
 
     /// History limit
-    #[clap(short, long, default_value = "HISTORY_LIMIT")]
+    #[clap(short, long, default_value = HISTORY_LIMIT)]
     limit: usize,
 
     /// Www-root directory
@@ -64,21 +60,28 @@ struct Args {
     #[clap(long)]
     prod: bool,
 
-    #[clap(short, long, default_value = "443")]
+    #[clap(short, long, default_value = TLS_PORT)]
     port: u16,
 }
 
 const ACCEPTED_PROTOCOL: &str = "mles-websocket";
 const TASK_BUF: usize = 16;
-const WS_BUF:usize = 128;
-const HISTORY_LIMIT:usize = 3000;
-const PING_INTERVAL:u64 = 12000;
+const WS_BUF: usize = 128;
+const HISTORY_LIMIT: &str = "200";
+const TLS_PORT: &str = "443";
+const PING_INTERVAL: u64 = 12000;
 
 #[derive(Debug)]
 enum WsEvent {
-    Init(u64, u64, Sender<Result<Message, warp::Error>>, oneshot::Sender<u64>, Message),
+    Init(
+        u64,
+        u64,
+        Sender<Result<Message, warp::Error>>,
+        oneshot::Sender<u64>,
+        Message,
+    ),
     Msg(u64, u64, Message),
-    Logoff(u64, u64)
+    Logoff(u64, u64),
 }
 
 fn add_message(msg: Message, limit: usize, queue: &mut VecDeque<Message>) {
@@ -101,7 +104,9 @@ async fn main() {
 
     let (tx, rx) = mpsc::channel::<WsEvent>(TASK_BUF);
     let mut rx = ReceiverStream::new(rx);
-    let tcp_listener = tokio::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, args.port)).await.unwrap();
+    let tcp_listener = tokio::net::TcpListener::bind((Ipv6Addr::UNSPECIFIED, args.port))
+        .await
+        .unwrap();
     let tcp_incoming = TcpListenerStream::new(tcp_listener);
 
     let tls_incoming = AcmeConfig::new(args.domains)
@@ -109,7 +114,6 @@ async fn main() {
         .cache_option(args.cache.clone().map(DirCache::new))
         .directory_lets_encrypt(args.prod)
         .tokio_incoming(tcp_incoming, Vec::new());
-
 
     tokio::spawn(async move {
         let mut msg_db: HashMap<u64, VecDeque<Message>> = HashMap::new();
@@ -122,49 +126,57 @@ async fn main() {
                             msg_db.insert(ch, VecDeque::new());
                         }
                         for (_, tx) in &uid_db {
-                            tx.send(Ok(msg.clone())).await;
+                            let _ = tx.send(Ok(msg.clone())).await;
                         }
                         uid_db.insert((h, ch), tx2.clone());
                         println!("Added {h}");
-                        err_tx.send(h);
+                        let _ = err_tx.send(h);
 
-                        let mut queue = msg_db.get_mut(&ch).unwrap();
-                        for qmsg in &mut *queue {
-                            tx2.send(Ok(qmsg.clone())).await;
+                        let queue = msg_db.get_mut(&ch);
+                        match queue {
+                            Some(queue) => {
+                                for qmsg in &*queue {
+                                    let _ = tx2.send(Ok(qmsg.clone())).await;
+                                }
+                                add_message(msg, limit, queue);
+                            }
+                            None => {} //TODO error?
                         }
-                        add_message(msg, limit, queue);
                     }
-                },
+                }
                 WsEvent::Msg(h, ch, msg) => {
-                    for (_, tx) in uid_db.iter().filter(|(&(x,_),_)| x != h) {
-                        tx.send(Ok(msg.clone())).await;
+                    for (_, tx) in uid_db.iter().filter(|(&(x, _), _)| x != h) {
+                        let _ = tx.send(Ok(msg.clone())).await;
                     }
-                    let mut queue = msg_db.get_mut(&ch).unwrap();
-                    add_message(msg, limit, queue);
-                },
+                    let queue = msg_db.get_mut(&ch);
+                    match queue {
+                        Some(queue) => add_message(msg, limit, queue),
+                        None => {} //TODO error?
+                    }
+                }
                 WsEvent::Logoff(h, ch) => {
                     uid_db.remove(&(h, ch));
                     println!("Removed {h}");
-                },
+                }
             }
         }
     });
-    
+
     let www_root_dir = args.wwwroot;
 
     let index = warp::fs::dir(www_root_dir);
     let tx_clone = tx.clone();
     let ws = warp::ws()
         .and(warp::header::exact(
-                "Sec-WebSocket-Protocol",
-                ACCEPTED_PROTOCOL,
-                ))
-    .map(move |ws: warp::ws::Ws| {
+            "Sec-WebSocket-Protocol",
+            ACCEPTED_PROTOCOL,
+        ))
+        .map(move |ws: warp::ws::Ws| {
             let tx_inner = tx_clone.clone();
             ws.on_upgrade(move |websocket| {
                 let (tx2, rx2) = mpsc::channel::<Result<Message, warp::Error>>(WS_BUF);
                 let (err_tx, err_rx) = oneshot::channel();
-                let mut rx2 = ReceiverStream::new(rx2);
+                let rx2 = ReceiverStream::new(rx2);
                 let (ws_tx, mut ws_rx) = websocket.split();
                 let h = Arc::new(AtomicU64::new(0));
                 let ch = Arc::new(AtomicU64::new(0));
@@ -186,7 +198,8 @@ async fn main() {
                         if !msg.is_text() {
                             return;
                         }
-                        let msghdr: Result<MlesHeader, serde_json::Error> = serde_json::from_str(msg.to_str().unwrap());
+                        let msghdr: Result<MlesHeader, serde_json::Error> =
+                            serde_json::from_str(msg.to_str().unwrap());
                         match msghdr {
                             Ok(msghdr) => {
                                 println!("Got fine msghdr!");
@@ -195,16 +208,24 @@ async fn main() {
                                 h.store(hasher.finish(), Ordering::SeqCst);
                                 let hasher = SipHasher::new();
                                 ch.store(hasher.hash(&msghdr.channel.as_bytes()), Ordering::SeqCst);
-                                tx.send(WsEvent::Init(h.load(Ordering::SeqCst), ch.load(Ordering::SeqCst), tx2_spawn, err_tx, msg)).await;
-                            },
-                            Err(_) => return
+                                let _ = tx
+                                    .send(WsEvent::Init(
+                                        h.load(Ordering::SeqCst),
+                                        ch.load(Ordering::SeqCst),
+                                        tx2_spawn,
+                                        err_tx,
+                                        msg,
+                                    ))
+                                    .await;
+                            }
+                            Err(_) => return,
                         }
                     }
                     match err_rx.await {
                         //Client ok?
                         Ok(v) => {
                             println!("got = {:?}", v);
-                        },
+                        }
                         Err(_) => {
                             println!("the sender dropped");
                             return;
@@ -216,10 +237,16 @@ async fn main() {
                             println!("Pong cntr {cntr}");
                             continue;
                         }
-                        tx.send(WsEvent::Msg(h.load(Ordering::SeqCst), ch.load(Ordering::SeqCst), msg)).await;
+                        let _ = tx
+                            .send(WsEvent::Msg(
+                                h.load(Ordering::SeqCst),
+                                ch.load(Ordering::SeqCst),
+                                msg,
+                            ))
+                            .await;
                     }
                 });
-                
+
                 let tx2_inner = tx2.clone();
                 let ping_cntr_inner = ping_cntr.clone();
                 let pong_cntr_inner = pong_cntr.clone();
@@ -233,34 +260,32 @@ async fn main() {
                         let pong_cnt = pong_cntr_inner.load(Ordering::Relaxed);
                         if pong_cnt + 1 < ping_cnt {
                             println!("Dropping inactive TLS connection..");
-                            tx2.send(Ok(Message::close())).await;
+                            let _ = tx2.send(Ok(Message::close())).await;
                             break;
                         }
                         let tx2 = tx2_clone.clone();
                         interval.tick().await;
-                        tx2.send(Ok(Message::ping(Vec::new()))).await;
+                        let _ = tx2.send(Ok(Message::ping(Vec::new()))).await;
                         println!("Ping cntr {ping_cnt}");
                     }
                 });
 
                 let tx_clone = tx_inner.clone();
-                rx2.forward(ws_tx)
-                    .map( move |res| {
-                        let tx = tx_clone.clone();
-                        if let Err(e) = res {
-                            println!("Websocket error: {:?}", e);
-                        }
-                        else {
-                            println!("Websocket: {:?}", res);
-                        }
-                        let h = h.load(Ordering::SeqCst);
-                        let ch = ch.load(Ordering::SeqCst);
-                        if h != 0 && ch != 0 {
-                            tokio::spawn(async move {
-                                tx.send(WsEvent::Logoff(h, ch)).await;
-                            });
-                        }
-                    })
+                rx2.forward(ws_tx).map(move |res| {
+                    let tx = tx_clone.clone();
+                    if let Err(e) = res {
+                        println!("Websocket error: {:?}", e);
+                    } else {
+                        println!("Websocket: {:?}", res);
+                    }
+                    let h = h.load(Ordering::SeqCst);
+                    let ch = ch.load(Ordering::SeqCst);
+                    if h != 0 && ch != 0 {
+                        tokio::spawn(async move {
+                            let _ = tx.send(WsEvent::Logoff(h, ch)).await;
+                        });
+                    }
+                })
                 /* TODO
                  * 1. Parse mles-websocket JSON format
                  * 2. If valid, create a siphash id and add to hashmap
@@ -274,7 +299,7 @@ async fn main() {
         .with(warp::reply::with::header(
             "Sec-WebSocket-Protocol",
             ACCEPTED_PROTOCOL,
-            ));
+        ));
 
     let tlsroutes = ws.or(index);
     warp::serve(tlsroutes).run_incoming(tls_incoming).await;
