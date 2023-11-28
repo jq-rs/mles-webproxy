@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 use std::net::Ipv6Addr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -35,32 +35,33 @@ struct MlesHeader {
 
 #[derive(Parser, Debug)]
 struct Args {
-    /// Domain
-    #[clap(short, required = true)]
+    /// Domain(s)
+    #[arg(short, long, required = true)]
     domains: Vec<String>,
 
     /// Contact info
-    #[clap(short)]
+    #[arg(short, long)]
     email: Vec<String>,
 
     /// Cache directory
-    #[clap(short, parse(from_os_str))]
+    #[arg(short, long)]
     cache: Option<PathBuf>,
 
     /// History limit
-    #[clap(short, long, default_value = HISTORY_LIMIT)]
-    limit: usize,
+    #[arg(short, long, default_value = HISTORY_LIMIT, value_parser = clap::value_parser!(u32).range(1..1_000_000))]
+    limit: u32,
 
-    /// Www-root directory
-    #[clap(short, parse(from_os_str), required = true)]
+    /// Www-root directory for domain(s) (e.g. /path/static where domain mles.io goes to
+    /// static/mles.io)
+    #[arg(short, long, required = true)]
     wwwroot: PathBuf,
 
-    /// Use Let's Encrypt production environment
+    /// Use Let's Encrypt staging environment
     /// (see https://letsencrypt.org/docs/staging-environment/)
-    #[clap(long)]
-    prod: bool,
+    #[arg(short, long, required = true)]
+    staging: bool,
 
-    #[clap(short, long, default_value = TLS_PORT)]
+    #[arg(short, long, default_value = TLS_PORT, value_parser = clap::value_parser!(u16).range(1..))]
     port: u16,
 }
 
@@ -84,10 +85,20 @@ enum WsEvent {
     Logoff(u64, u64),
 }
 
-fn add_message(msg: Message, limit: usize, queue: &mut VecDeque<Message>) {
+// Determine the www-root directory based on the host
+fn determine_domain_root(default_www_root: &PathBuf, host: &str) -> PathBuf {
+    // You can implement your logic here to map hosts to www-root directories
+    // For simplicity, this example uses a default directory and appends the host
+    let sanitized_host = host.replace(".", "_"); // Sanitize the host to avoid directory traversal
+    let www_root = default_www_root.join(sanitized_host);
+    www_root
+}
+
+fn add_message(msg: Message, limit: u32, queue: &mut VecDeque<Message>) {
+    let limit = limit as usize;
     let len = queue.len();
     let cap = queue.capacity();
-    if len == cap && cap * 2 >= limit {
+    if cap < limit && len == cap && cap * 2 >= limit {
         queue.reserve(limit - queue.capacity())
     }
     if len == limit {
@@ -98,9 +109,10 @@ fn add_message(msg: Message, limit: usize, queue: &mut VecDeque<Message>) {
 
 #[tokio::main]
 async fn main() {
-    simple_logger::init_with_level(log::Level::Info).unwrap();
+    simple_logger::init_with_env().unwrap();
     let args = Args::parse();
     let limit = args.limit;
+    let www_root_dir = args.wwwroot;
 
     let (tx, rx) = mpsc::channel::<WsEvent>(TASK_BUF);
     let mut rx = ReceiverStream::new(rx);
@@ -112,7 +124,7 @@ async fn main() {
     let tls_incoming = AcmeConfig::new(args.domains)
         .contact(args.email.iter().map(|e| format!("mailto:{}", e)))
         .cache_option(args.cache.clone().map(DirCache::new))
-        .directory_lets_encrypt(args.prod)
+        .directory_lets_encrypt(args.staging)
         .tokio_incoming(tcp_incoming, Vec::new());
 
     tokio::spawn(async move {
@@ -122,25 +134,20 @@ async fn main() {
             match event {
                 WsEvent::Init(h, ch, tx2, err_tx, msg) => {
                     if !uid_db.contains_key(&(h, ch)) {
-                        if !msg_db.contains_key(&ch) {
-                            msg_db.insert(ch, VecDeque::new());
-                        }
-                        for (_, tx) in &uid_db {
+                        msg_db.entry(ch).or_default();
+                        for tx in uid_db.values() {
                             let _ = tx.send(Ok(msg.clone())).await;
                         }
                         uid_db.insert((h, ch), tx2.clone());
-                        println!("Added {h}");
+                        log::info!("Added {h} into {ch}.");
                         let _ = err_tx.send(h);
 
                         let queue = msg_db.get_mut(&ch);
-                        match queue {
-                            Some(queue) => {
-                                for qmsg in &*queue {
-                                    let _ = tx2.send(Ok(qmsg.clone())).await;
-                                }
-                                add_message(msg, limit, queue);
+                        if let Some(queue) = queue {
+                            for qmsg in &*queue {
+                                let _ = tx2.send(Ok(qmsg.clone())).await;
                             }
-                            None => {} //TODO error?
+                            add_message(msg, limit, queue);
                         }
                     }
                 }
@@ -149,22 +156,34 @@ async fn main() {
                         let _ = tx.send(Ok(msg.clone())).await;
                     }
                     let queue = msg_db.get_mut(&ch);
-                    match queue {
-                        Some(queue) => add_message(msg, limit, queue),
-                        None => {} //TODO error?
+                    if let Some(queue) = queue {
+                        add_message(msg, limit, queue);
                     }
                 }
                 WsEvent::Logoff(h, ch) => {
                     uid_db.remove(&(h, ch));
-                    println!("Removed {h}");
+                    log::info!("Removed {h} from {ch}.");
                 }
             }
         }
     });
 
-    let www_root_dir = args.wwwroot;
+    /*let index = warp::path::end()
+        .and(warp::get())
+        .and(warp::header::<String>("host"))
+        .map(|host| {
+            // Use the host to determine the www-root directory
+            let domain_root = determine_domain_root(&www_root_dir, &host);
+            let domain_root_path = Path::new(&domain_root);
+            if domain_root_path.exists() {
+                log::info!("Valid domain {}", domain_root_path.display());
+                return warp::fs::dir(domain_root_path)
+            }
+        })
+        .or_else(warp::fs::dir(www_root_dir)); */
 
     let index = warp::fs::dir(www_root_dir);
+
     let tx_clone = tx.clone();
     let ws = warp::ws()
         .and(warp::header::exact(
@@ -183,7 +202,6 @@ async fn main() {
                 let ping_cntr = Arc::new(AtomicU64::new(0));
                 let pong_cntr = Arc::new(AtomicU64::new(0));
 
-                println!("Listening mles-websocket...");
                 let tx = tx_inner.clone();
                 let tx2_inner = tx2.clone();
                 let h_clone = h.clone();
@@ -202,12 +220,11 @@ async fn main() {
                             serde_json::from_str(msg.to_str().unwrap());
                         match msghdr {
                             Ok(msghdr) => {
-                                println!("Got fine msghdr!");
                                 let mut hasher = SipHasher::new();
                                 msghdr.hash(&mut hasher);
                                 h.store(hasher.finish(), Ordering::SeqCst);
                                 let hasher = SipHasher::new();
-                                ch.store(hasher.hash(&msghdr.channel.as_bytes()), Ordering::SeqCst);
+                                ch.store(hasher.hash(msghdr.channel.as_bytes()), Ordering::SeqCst);
                                 let _ = tx
                                     .send(WsEvent::Init(
                                         h.load(Ordering::SeqCst),
@@ -222,19 +239,14 @@ async fn main() {
                         }
                     }
                     match err_rx.await {
-                        //Client ok?
-                        Ok(v) => {
-                            println!("got = {:?}", v);
-                        }
+                        Ok(_) => {}
                         Err(_) => {
-                            println!("the sender dropped");
                             return;
                         }
                     }
                     while let Some(Ok(msg)) = ws_rx.next().await {
                         if msg.is_pong() {
-                            let cntr = pong_cntr_inner.fetch_add(1, Ordering::Relaxed);
-                            println!("Pong cntr {cntr}");
+                            pong_cntr_inner.fetch_add(1, Ordering::Relaxed);
                             continue;
                         }
                         let _ = tx
@@ -259,25 +271,18 @@ async fn main() {
                         let ping_cnt = ping_cntr_inner.fetch_add(1, Ordering::Relaxed);
                         let pong_cnt = pong_cntr_inner.load(Ordering::Relaxed);
                         if pong_cnt + 1 < ping_cnt {
-                            println!("Dropping inactive TLS connection..");
                             let _ = tx2.send(Ok(Message::close())).await;
                             break;
                         }
                         let tx2 = tx2_clone.clone();
                         interval.tick().await;
                         let _ = tx2.send(Ok(Message::ping(Vec::new()))).await;
-                        println!("Ping cntr {ping_cnt}");
                     }
                 });
 
                 let tx_clone = tx_inner.clone();
-                rx2.forward(ws_tx).map(move |res| {
+                rx2.forward(ws_tx).map(move |_res| {
                     let tx = tx_clone.clone();
-                    if let Err(e) = res {
-                        println!("Websocket error: {:?}", e);
-                    } else {
-                        println!("Websocket: {:?}", res);
-                    }
                     let h = h.load(Ordering::SeqCst);
                     let ch = ch.load(Ordering::SeqCst);
                     if h != 0 && ch != 0 {
@@ -286,14 +291,6 @@ async fn main() {
                         });
                     }
                 })
-                /* TODO
-                 * 1. Parse mles-websocket JSON format
-                 * 2. If valid, create a siphash id and add to hashmap
-                 * 3. Send message history to receiver
-                 * 4. Add message to message history
-                 * 5. Forward to other ids
-                 * 6. Start forwarding messages back and forth 4->5 in its own task
-                 */
             })
         })
         .with(warp::reply::with::header(
