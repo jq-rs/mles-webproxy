@@ -26,6 +26,12 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::wrappers::TcpListenerStream;
 use warp::ws::Message;
 use warp::Filter;
+use warp::filters::BoxedFilter;
+use warp::http::HeaderValue;
+use warp::hyper::Body;
+use warp::hyper::Response;
+use std::convert::Infallible;
+use std::fs::File;
 
 #[derive(Serialize, Deserialize, Hash)]
 struct MlesHeader {
@@ -85,15 +91,6 @@ enum WsEvent {
     Logoff(u64, u64),
 }
 
-// Determine the www-root directory based on the host
-fn determine_domain_root(default_www_root: &PathBuf, host: &str) -> PathBuf {
-    // You can implement your logic here to map hosts to www-root directories
-    // For simplicity, this example uses a default directory and appends the host
-    let sanitized_host = host.replace(".", "_"); // Sanitize the host to avoid directory traversal
-    let www_root = default_www_root.join(sanitized_host);
-    www_root
-}
-
 fn add_message(msg: Message, limit: u32, queue: &mut VecDeque<Message>) {
     let limit = limit as usize;
     let len = queue.len();
@@ -121,10 +118,10 @@ async fn main() {
         .unwrap();
     let tcp_incoming = TcpListenerStream::new(tcp_listener);
 
-    let tls_incoming = AcmeConfig::new(args.domains)
+    let tls_incoming = AcmeConfig::new(args.domains.clone())
         .contact(args.email.iter().map(|e| format!("mailto:{}", e)))
         .cache_option(args.cache.clone().map(DirCache::new))
-        .directory_lets_encrypt(args.staging)
+        .directory_lets_encrypt(!args.staging)
         .tokio_incoming(tcp_incoming, Vec::new());
 
     tokio::spawn(async move {
@@ -168,22 +165,6 @@ async fn main() {
         }
     });
 
-    /*let index = warp::path::end()
-        .and(warp::get())
-        .and(warp::header::<String>("host"))
-        .map(|host| {
-            // Use the host to determine the www-root directory
-            let domain_root = determine_domain_root(&www_root_dir, &host);
-            let domain_root_path = Path::new(&domain_root);
-            if domain_root_path.exists() {
-                log::info!("Valid domain {}", domain_root_path.display());
-                return warp::fs::dir(domain_root_path)
-            }
-        })
-        .or_else(warp::fs::dir(www_root_dir)); */
-
-    let index = warp::fs::dir(www_root_dir);
-
     let tx_clone = tx.clone();
     let ws = warp::ws()
         .and(warp::header::exact(
@@ -193,7 +174,7 @@ async fn main() {
         .map(move |ws: warp::ws::Ws| {
             let tx_inner = tx_clone.clone();
             ws.on_upgrade(move |websocket| {
-                let (tx2, rx2) = mpsc::channel::<Result<Message, warp::Error>>(WS_BUF);
+            let (tx2, rx2) = mpsc::channel::<Result<Message, warp::Error>>(WS_BUF);
                 let (err_tx, err_rx) = oneshot::channel();
                 let rx2 = ReceiverStream::new(rx2);
                 let (ws_tx, mut ws_rx) = websocket.split();
@@ -297,6 +278,18 @@ async fn main() {
             "Sec-WebSocket-Protocol",
             ACCEPTED_PROTOCOL,
         ));
+
+    let mut vindex = Vec::new();
+    for domain in &args.domains {
+        let route = warp::path(domain.clone()).and(warp::fs::dir(domain.clone()));
+        vindex.push(route);
+    }
+
+    let first = vindex.pop().unwrap();
+    let mut index: BoxedFilter<_> = first.boxed();
+    for val in vindex {
+        index = val.or(index).unify().boxed();
+    }
 
     let tlsroutes = ws.or(index);
     warp::serve(tlsroutes).run_incoming(tls_incoming).await;
