@@ -68,7 +68,7 @@ struct Args {
 
     /// Use Let's Encrypt staging environment
     /// (see https://letsencrypt.org/docs/staging-environment/)
-    #[arg(short, long, required = true)]
+    #[arg(short, long)]
     staging: bool,
 
     #[arg(short, long, default_value = TLS_PORT, value_parser = clap::value_parser!(u16).range(1..))]
@@ -301,7 +301,7 @@ async fn main() {
         //let index = warp::header::<String>("host").map(|uri: String| warp::fs::dir(&uri).clone()).map(|reply: impl warp::filter::FilterClone + warp::filter::FilterBase<Extract = (warp::fs::File,), Error = Rejection>| {
         //    reply.into_response()
         //});
-        let index = warp::header::<String>("host").map(move |uri: String| (uri, domain.clone(), www_root.to_str().unwrap().to_string())).and_then(dyn_reply);
+        let index = warp::get().and(warp::header::<String>("host")).and(warp::path::tail()).map(move |uri: String, path: warp::path::Tail| (uri, domain.clone(), www_root.to_str().unwrap().to_string(), path)).and_then(dyn_reply);
         //let route = warp::header::<String>("host").map(|uri: String| (uri, domain.clone())).and_then(dyn_reply);
         vindex.push(index);
     }
@@ -319,14 +319,19 @@ async fn main() {
     unreachable!()
 }
 
-async fn dyn_reply(tuple: (String, String, String)) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
-    let (uri, domain, www_root) = tuple;
+async fn dyn_reply(tuple: (String, String, String, warp::path::Tail)) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
+    let (uri, domain, www_root, tail) = tuple;
 
     if uri != domain {
         return Err(warp::reject::not_found());
     }
-    let file_path = format!("{}/{}", www_root, uri);
-    log::debug!("Accessing {file_path}.");
+    let mut path = tail.as_str();
+    if 0 == path.len() {
+        path = "index.html";
+    }
+    let file_path = format!("{}/{}/{}", www_root, uri, path);
+    log::debug!("Tail {}", tail.as_str());
+    log::debug!("Accessing {file_path}...");
 
 
     // Open the file
@@ -335,11 +340,13 @@ async fn dyn_reply(tuple: (String, String, String)) -> Result<Box<dyn warp::Repl
             // Read the file content into a Vec<u8>
             let mut buffer = Vec::new();
             if let Err(_) = file.read_to_end(&mut buffer).await {
+                log::debug!("...FAILED!");
                 return Ok(Box::new(warp::reply::with_status(
                         "Internal Server Error",
                         StatusCode::INTERNAL_SERVER_ERROR,
                         )));
             }
+            log::debug!("...OK.");
 
             // Create a custom response with the file content
             Ok(Box::new(warp::reply::Response::new(buffer.into())))
