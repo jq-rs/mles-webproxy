@@ -5,7 +5,7 @@
  *  Copyright (C) 2023  Mles developers
  */
 use clap::Parser;
-use futures_util::{FutureExt, StreamExt, future::ready};
+use futures_util::{FutureExt, StreamExt};
 use rustls_acme::caches::DirCache;
 use rustls_acme::AcmeConfig;
 use serde::{Deserialize, Serialize};
@@ -14,9 +14,11 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::hash::{Hash, Hasher};
 use std::net::Ipv6Addr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use tokio::fs::File;
+use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
@@ -24,18 +26,10 @@ use tokio::time;
 use tokio::time::Duration;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::wrappers::TcpListenerStream;
+use warp::filters::BoxedFilter;
+use warp::http::StatusCode;
 use warp::ws::Message;
 use warp::Filter;
-use warp::filters::BoxedFilter;
-use warp::http::HeaderValue;
-use warp::http::StatusCode;
-use warp::path::FullPath;
-use warp::hyper::Body;
-use warp::reply::Reply;
-use warp::hyper::Response;
-use std::convert::Infallible;
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
 
 #[derive(Serialize, Deserialize, Hash)]
 struct MlesHeader {
@@ -178,7 +172,7 @@ async fn main() {
         .map(move |ws: warp::ws::Ws| {
             let tx_inner = tx_clone.clone();
             ws.on_upgrade(move |websocket| {
-            let (tx2, rx2) = mpsc::channel::<Result<Message, warp::Error>>(WS_BUF);
+                let (tx2, rx2) = mpsc::channel::<Result<Message, warp::Error>>(WS_BUF);
                 let (err_tx, err_rx) = oneshot::channel();
                 let rx2 = ReceiverStream::new(rx2);
                 let (ws_tx, mut ws_rx) = websocket.split();
@@ -284,25 +278,20 @@ async fn main() {
         ));
 
     let mut vindex = Vec::new();
-    //for domain in &args.domains {
-     //   let route = warp::header::<String>("host").map(|uri: String| (uri, domain.clone())).and_then(dyn_reply);
-     //   vindex.push(route);
-    //}
-    /*for domain in &args.domains {
-        let index = warp::fs::dir(domain.clone())
-            .map(|reply: warp::filters::fs::File| {
-                reply.into_response()
-            });
-        //let route = warp::header::<String>("host").map(|uri: String| (uri, domain.clone())).and_then(dyn_reply);
-        vindex.push(index);
-    }*/
     for domain in args.domains {
         let www_root = www_root_dir.clone();
-        //let index = warp::header::<String>("host").map(|uri: String| warp::fs::dir(&uri).clone()).map(|reply: impl warp::filter::FilterClone + warp::filter::FilterBase<Extract = (warp::fs::File,), Error = Rejection>| {
-        //    reply.into_response()
-        //});
-        let index = warp::get().and(warp::header::<String>("host")).and(warp::path::tail()).map(move |uri: String, path: warp::path::Tail| (uri, domain.clone(), www_root.to_str().unwrap().to_string(), path)).and_then(dyn_reply);
-        //let route = warp::header::<String>("host").map(|uri: String| (uri, domain.clone())).and_then(dyn_reply);
+        let index = warp::get()
+            .and(warp::header::<String>("host"))
+            .and(warp::path::tail())
+            .map(move |uri: String, path: warp::path::Tail| {
+                (
+                    uri,
+                    domain.clone(),
+                    www_root.to_str().unwrap().to_string(),
+                    path,
+                )
+            })
+            .and_then(dyn_reply);
         vindex.push(index);
     }
 
@@ -313,38 +302,38 @@ async fn main() {
     }
 
     let tlsroutes = ws.or(index);
-    //let tlsroutes = index;
     warp::serve(tlsroutes).run_incoming(tls_incoming).await;
 
     unreachable!()
 }
 
-async fn dyn_reply(tuple: (String, String, String, warp::path::Tail)) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
+async fn dyn_reply(
+    tuple: (String, String, String, warp::path::Tail),
+) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
     let (uri, domain, www_root, tail) = tuple;
 
     if uri != domain {
         return Err(warp::reject::not_found());
     }
     let mut path = tail.as_str();
-    if 0 == path.len() {
+    if path.is_empty() {
         path = "index.html";
     }
     let file_path = format!("{}/{}/{}", www_root, uri, path);
     log::debug!("Tail {}", tail.as_str());
     log::debug!("Accessing {file_path}...");
 
-
     // Open the file
     match File::open(&file_path).await {
         Ok(mut file) => {
             // Read the file content into a Vec<u8>
             let mut buffer = Vec::new();
-            if let Err(_) = file.read_to_end(&mut buffer).await {
+            if (file.read_to_end(&mut buffer).await).is_err() {
                 log::debug!("...FAILED!");
                 return Ok(Box::new(warp::reply::with_status(
-                        "Internal Server Error",
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        )));
+                    "Internal Server Error",
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                )));
             }
             log::debug!("...OK.");
 
@@ -355,29 +344,9 @@ async fn dyn_reply(tuple: (String, String, String, warp::path::Tail)) -> Result<
             // Handle the case where the file doesn't exist or other errors
             log::debug!("{file_path} does not exist.");
             Ok(Box::new(warp::reply::with_status(
-                    "Not Found",
-                    StatusCode::NOT_FOUND,
-                    )))
+                "Not Found",
+                StatusCode::NOT_FOUND,
+            )))
         }
     }
 }
-
-/*
-async fn dyn_reply(word: String) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
-    if &word == "hello" {
-        Ok(Box::new("world"))
-    } else {
-        Ok(Box::new(StatusCode::BAD_REQUEST))
-    }
-}*/
-
-/*
-async fn dyn_reply(pair: (String, String)) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
-    let (uri, domain) = pair;
-    if uri == domain {
-        Ok(Box::new(warp::path("static").and(warp::fs::dir(&uri)).map(|reply: warp::filters::fs::File|reply.into_response())))
-    }
-    else {
-        Ok(Box::new(StatusCode::BAD_REQUEST))
-    }
-}*/
