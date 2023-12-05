@@ -295,7 +295,7 @@ async fn main() {
         vindex.push(index);
     }
 
-    let mut index: BoxedFilter<_> = vindex.remove(0).boxed();
+    let mut index: BoxedFilter<_> = vindex.swap_remove(0).boxed();
     for val in vindex {
         index = val.or(index).unify().boxed();
     }
