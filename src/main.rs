@@ -102,7 +102,7 @@ fn add_message(msg: Message, limit: u32, queue: &mut VecDeque<Message>) {
     queue.push_back(msg);
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     simple_logger::init_with_env().unwrap();
     let args = Args::parse();
@@ -131,24 +131,40 @@ async fn main() {
                     if !uid_db.contains_key(&(h, ch)) {
                         msg_db.entry(ch).or_default();
                         for tx in uid_db.values() {
-                            let _ = tx.send(Ok(msg.clone())).await;
+                                let res = tx.send(Ok(msg.clone())).await;
+                                    match res {
+                                        Err(err) => { log::info!("Got tx msg err {err}"); },
+                                        Ok(_) => {}
+                                    }
                         }
                         uid_db.insert((h, ch), tx2.clone());
-                        log::info!("Added {h} into {ch}.");
+                        log::info!("Added {h:x} into {ch:x}.");
                         let _ = err_tx.send(h);
 
                         let queue = msg_db.get_mut(&ch);
                         if let Some(queue) = queue {
                             for qmsg in &*queue {
-                                let _ = tx2.send(Ok(qmsg.clone())).await;
+                                    let res  = tx2.send(Ok(qmsg.clone())).await;
+                                    match res {
+                                        Err(err) => { log::info!("Got tx snd qmsg err {err}"); },
+                                        Ok(_) => {}
+                                    }
                             }
                             add_message(msg, limit, queue);
                         }
                     }
+                    else {
+                        log::warn!("Init done to {h:x} into {ch:x}, closing!");
+                    }
+
                 }
                 WsEvent::Msg(h, ch, msg) => {
                     for (_, tx) in uid_db.iter().filter(|(&(x, _), _)| x != h) {
-                        let _ = tx.send(Ok(msg.clone())).await;
+                        let res = tx.send(Ok(msg.clone())).await;
+                        match res {
+                            Err(err) => { log::info!("Got tx snd msg err {err}"); },
+                            Ok(_) => {}
+                        }
                     }
                     let queue = msg_db.get_mut(&ch);
                     if let Some(queue) = queue {
@@ -157,7 +173,7 @@ async fn main() {
                 }
                 WsEvent::Logoff(h, ch) => {
                     uid_db.remove(&(h, ch));
-                    log::info!("Removed {h} from {ch}.");
+                    log::info!("Removed {h:x} from {ch:x}.");
                 }
             }
         }
@@ -220,6 +236,7 @@ async fn main() {
                     match err_rx.await {
                         Ok(_) => {}
                         Err(_) => {
+                            log::info!("Got error from oneshot!");
                             return;
                         }
                     }
@@ -228,13 +245,24 @@ async fn main() {
                             pong_cntr_inner.fetch_add(1, Ordering::Relaxed);
                             continue;
                         }
-                        let _ = tx
+                        if msg.is_close() {
+                            log::info!("Got close, signing out!");
+                            break;
+                        }
+                        let val = tx
                             .send(WsEvent::Msg(
                                 h.load(Ordering::SeqCst),
                                 ch.load(Ordering::SeqCst),
                                 msg,
                             ))
                             .await;
+                        match val {
+                            Ok(_) => {},
+                            Err(err) => {
+                                log::warn!("Invalid tx {:?}", err);
+                                break;
+                            }
+                        }
                     }
                 });
 
@@ -249,18 +277,33 @@ async fn main() {
                     loop {
                         let ping_cnt = ping_cntr_inner.fetch_add(1, Ordering::Relaxed);
                         let pong_cnt = pong_cntr_inner.load(Ordering::Relaxed);
-                        if pong_cnt + 1 < ping_cnt {
-                            let _ = tx2.send(Ok(Message::close())).await;
+                        let tx2 = tx2_clone.clone();
+                        if pong_cnt + 2 < ping_cnt {
+                            log::info!("No pongs, close (todo)");
+                            /*let val = tx2.send(Err(_)).await;
+                            match val {
+                                Ok(_) => {},
+                                Err(err) => {
+                                    log::warn!("Invalid close tx {:?}", err);
+                                }
+                            }*/
                             break;
                         }
-                        let tx2 = tx2_clone.clone();
                         interval.tick().await;
-                        let _ = tx2.send(Ok(Message::ping(Vec::new()))).await;
+                        let val = tx2.send(Ok(Message::ping(Vec::new()))).await;
+                        match val {
+                            Ok(_) => {},
+                            Err(err) => {
+                                log::info!("Invalid ping tx {:?}", err);
+                                break;
+                            }
+                        }
                     }
                 });
 
                 let tx_clone = tx_inner.clone();
-                rx2.forward(ws_tx).map(move |_res| {
+                rx2.forward(ws_tx).map(move |res| {
+                    log::info!("Got {:?} before closing", res);
                     let tx = tx_clone.clone();
                     let h = h.load(Ordering::SeqCst);
                     let ch = ch.load(Ordering::SeqCst);
