@@ -5,7 +5,7 @@
  *  Copyright (C) 2023  Mles developers
  */
 use clap::Parser;
-use futures_util::{FutureExt, StreamExt};
+use futures_util::{StreamExt, SinkExt};
 use rustls_acme::caches::DirCache;
 use rustls_acme::AcmeConfig;
 use serde::{Deserialize, Serialize};
@@ -81,7 +81,7 @@ enum WsEvent {
     Init(
         u64,
         u64,
-        Sender<Result<Message, warp::Error>>,
+        Sender<Option<Result<Message, warp::Error>>>,
         oneshot::Sender<u64>,
         Message,
     ),
@@ -124,14 +124,14 @@ async fn main() {
 
     tokio::spawn(async move {
         let mut msg_db: HashMap<u64, VecDeque<Message>> = HashMap::new();
-        let mut uid_db: HashMap<(u64, u64), Sender<Result<Message, warp::Error>>> = HashMap::new();
+        let mut uid_db: HashMap<(u64, u64), Sender<Option<Result<Message, warp::Error>>>> = HashMap::new();
         while let Some(event) = rx.next().await {
             match event {
                 WsEvent::Init(h, ch, tx2, err_tx, msg) => {
                     if !uid_db.contains_key(&(h, ch)) {
                         msg_db.entry(ch).or_default();
                         for tx in uid_db.values() {
-                                let res = tx.send(Ok(msg.clone())).await;
+                                let res = tx.send(Some(Ok(msg.clone()))).await;
                                     match res {
                                         Err(err) => { log::info!("Got tx msg err {err}"); },
                                         Ok(_) => {}
@@ -144,7 +144,7 @@ async fn main() {
                         let queue = msg_db.get_mut(&ch);
                         if let Some(queue) = queue {
                             for qmsg in &*queue {
-                                    let res  = tx2.send(Ok(qmsg.clone())).await;
+                                    let res  = tx2.send(Some(Ok(qmsg.clone()))).await;
                                     match res {
                                         Err(err) => { log::info!("Got tx snd qmsg err {err}"); },
                                         Ok(_) => {}
@@ -160,7 +160,7 @@ async fn main() {
                 }
                 WsEvent::Msg(h, ch, msg) => {
                     for (_, tx) in uid_db.iter().filter(|(&(x, _), _)| x != h) {
-                        let res = tx.send(Ok(msg.clone())).await;
+                        let res = tx.send(Some(Ok(msg.clone()))).await;
                         match res {
                             Err(err) => { log::info!("Got tx snd msg err {err}"); },
                             Ok(_) => {}
@@ -188,10 +188,10 @@ async fn main() {
         .map(move |ws: warp::ws::Ws| {
             let tx_inner = tx_clone.clone();
             ws.on_upgrade(move |websocket| {
-                let (tx2, rx2) = mpsc::channel::<Result<Message, warp::Error>>(WS_BUF);
+                let (tx2, rx2) = mpsc::channel::<Option<Result<Message, warp::Error>>>(WS_BUF);
                 let (err_tx, err_rx) = oneshot::channel();
-                let rx2 = ReceiverStream::new(rx2);
-                let (ws_tx, mut ws_rx) = websocket.split();
+                let mut rx2 = ReceiverStream::new(rx2);
+                let (mut ws_tx, mut ws_rx) = websocket.split();
                 let h = Arc::new(AtomicU64::new(0));
                 let ch = Arc::new(AtomicU64::new(0));
                 let ping_cntr = Arc::new(AtomicU64::new(0));
@@ -240,13 +240,16 @@ async fn main() {
                             return;
                         }
                     }
+                    let tx2_sign = tx2_inner.clone();
                     while let Some(Ok(msg)) = ws_rx.next().await {
+                        let tx2 = tx2_sign.clone();
                         if msg.is_pong() {
                             pong_cntr_inner.fetch_add(1, Ordering::Relaxed);
                             continue;
                         }
                         if msg.is_close() {
                             log::info!("Got close, signing out!");
+                            let _ = tx2.send(None).await;
                             break;
                         }
                         let val = tx
@@ -279,18 +282,18 @@ async fn main() {
                         let pong_cnt = pong_cntr_inner.load(Ordering::Relaxed);
                         let tx2 = tx2_clone.clone();
                         if pong_cnt + 2 < ping_cnt {
-                            log::info!("No pongs, close (todo)");
-                            /*let val = tx2.send(Err(_)).await;
+                            log::info!("No pongs, close");
+                            let val = tx2.send(None).await;
                             match val {
                                 Ok(_) => {},
                                 Err(err) => {
                                     log::warn!("Invalid close tx {:?}", err);
                                 }
-                            }*/
+                            }
                             break;
                         }
                         interval.tick().await;
-                        let val = tx2.send(Ok(Message::ping(Vec::new()))).await;
+                        let val = tx2.send(Some(Ok(Message::ping(Vec::new())))).await;
                         match val {
                             Ok(_) => {},
                             Err(err) => {
@@ -302,17 +305,25 @@ async fn main() {
                 });
 
                 let tx_clone = tx_inner.clone();
-                rx2.forward(ws_tx).map(move |res| {
-                    log::info!("Got {:?} before closing", res);
+                async move {
+                    while let Some(Some(Ok(msg))) = rx2.next().await {
+                        let val = ws_tx.send(msg).await;
+                        match val {
+                            Ok(_) => {},
+                            Err(err) => {
+                                log::info!("Invalid ws tx {:?}", err);
+                                break;
+                            }
+                        }
+                    }
+                    log::info!("Signing off");
                     let tx = tx_clone.clone();
                     let h = h.load(Ordering::SeqCst);
                     let ch = ch.load(Ordering::SeqCst);
                     if h != 0 && ch != 0 {
-                        tokio::spawn(async move {
-                            let _ = tx.send(WsEvent::Logoff(h, ch)).await;
-                        });
+                        let _ = tx.send(WsEvent::Logoff(h, ch)).await;
                     }
-                })
+                }
             })
         })
         .with(warp::reply::with::header(
