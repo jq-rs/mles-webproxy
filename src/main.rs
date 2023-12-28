@@ -5,13 +5,13 @@
  *  Copyright (C) 2023  Mles developers
  */
 use clap::Parser;
-use futures_util::{StreamExt, SinkExt};
+use futures_util::{SinkExt, StreamExt};
 use rustls_acme::caches::DirCache;
 use rustls_acme::AcmeConfig;
 use serde::{Deserialize, Serialize};
 use siphasher::sip::SipHasher;
-use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::collections::{hash_map::Entry, HashMap};
 use std::hash::{Hash, Hasher};
 use std::net::Ipv6Addr;
 use std::path::PathBuf;
@@ -124,62 +124,69 @@ async fn main() {
 
     tokio::spawn(async move {
         let mut msg_db: HashMap<u64, VecDeque<Message>> = HashMap::new();
-        let mut uid_db: HashMap<(u64, u64), Sender<Option<Result<Message, warp::Error>>>> = HashMap::new();
+        let mut ch_db: HashMap<u64, HashMap<u64, Sender<Option<Result<Message, warp::Error>>>>> =
+            HashMap::new();
         while let Some(event) = rx.next().await {
             match event {
                 WsEvent::Init(h, ch, tx2, err_tx, msg) => {
-                    if !uid_db.contains_key(&(h, ch)) {
-                        msg_db.entry(ch).or_default();
-                        uid_db.insert((h, ch), tx2.clone());
-                        log::info!("Added {h:x} into {ch:x}.");
+                    if !ch_db.contains_key(&ch) {
+                        ch_db.entry(ch).or_default();
+                    }
+                    if let Some(uid_db) = ch_db.get_mut(&ch) {
+                        if let Entry::Vacant(e) = uid_db.entry(h) {
+                            msg_db.entry(ch).or_default();
+                            e.insert(tx2.clone());
+                            log::info!("Added {h:x} into {ch:x}.");
 
-                        let val = err_tx.send(h);
-                        match val {
-                            Err(err) => { log::info!("Got err tx msg err {err}"); },
-                            Ok(_) => {}
+                            let val = err_tx.send(h);
+                            if let Err(err) = val {
+                                log::info!("Got err tx msg err {err}");
+                            }
+
+                            for (_, tx) in uid_db.iter().filter(|(&xh, _)| xh != h) {
+                                let res = tx.send(Some(Ok(msg.clone()))).await;
+                                if let Err(err) = res {
+                                    log::info!("Got tx msg err {err}");
+                                }
+                            }
+
+                            let queue = msg_db.get_mut(&ch);
+                            if let Some(queue) = queue {
+                                for qmsg in &*queue {
+                                    let res = tx2.send(Some(Ok(qmsg.clone()))).await;
+                                    if let Err(err) = res {
+                                        log::info!("Got tx snd qmsg err {err}");
+                                    }
+                                }
+                                add_message(msg, limit, queue);
+                            }
+                        } else {
+                            log::warn!("Init done to {h:x} into {ch:x}, closing!");
                         }
-
-                        for (_, tx) in uid_db.iter().filter(|(&(xh, xch), _)| xch == ch && xh != h) {
+                    }
+                }
+                WsEvent::Msg(h, ch, msg) => {
+                    if let Some(uid_db) = ch_db.get(&ch) {
+                        for (_, tx) in uid_db.iter().filter(|(&xh, _)| xh != h) {
                             let res = tx.send(Some(Ok(msg.clone()))).await;
-                            match res {
-                                Err(err) => { log::info!("Got tx msg err {err}"); },
-                                Ok(_) => {}
+                            if let Err(err) = res {
+                                log::info!("Got tx snd msg err {err}");
                             }
                         }
-
                         let queue = msg_db.get_mut(&ch);
                         if let Some(queue) = queue {
-                            for qmsg in &*queue {
-                                    let res  = tx2.send(Some(Ok(qmsg.clone()))).await;
-                                    match res {
-                                        Err(err) => { log::info!("Got tx snd qmsg err {err}"); },
-                                        Ok(_) => {}
-                                    }
-                            }
                             add_message(msg, limit, queue);
                         }
                     }
-                    else {
-                        log::warn!("Init done to {h:x} into {ch:x}, closing!");
-                    }
-
-                }
-                WsEvent::Msg(h, ch, msg) => {
-                    for (_, tx) in uid_db.iter().filter(|(&(xh, xch), _)| xch == ch && xh != h) {
-                        let res = tx.send(Some(Ok(msg.clone()))).await;
-                        match res {
-                            Err(err) => { log::info!("Got tx snd msg err {err}"); },
-                            Ok(_) => {}
-                        }
-                    }
-                    let queue = msg_db.get_mut(&ch);
-                    if let Some(queue) = queue {
-                        add_message(msg, limit, queue);
-                    }
                 }
                 WsEvent::Logoff(h, ch) => {
-                    uid_db.remove(&(h, ch));
-                    log::info!("Removed {h:x} from {ch:x}.");
+                    if let Some(uid_db) = ch_db.get_mut(&ch) {
+                        uid_db.remove(&h);
+                        if uid_db.is_empty() {
+                            ch_db.remove(&ch);
+                        }
+                        log::info!("Removed {h:x} from {ch:x}.");
+                    }
                 }
             }
         }
@@ -254,7 +261,6 @@ async fn main() {
                             continue;
                         }
                         if msg.is_close() {
-                            log::info!("Got close, signing out!");
                             let _ = tx2.send(None).await;
                             break;
                         }
@@ -265,12 +271,9 @@ async fn main() {
                                 msg,
                             ))
                             .await;
-                        match val {
-                            Ok(_) => {},
-                            Err(err) => {
-                                log::warn!("Invalid tx {:?}", err);
-                                break;
-                            }
+                        if let Err(err) = val {
+                            log::warn!("Invalid tx {:?}", err);
+                            break;
                         }
                     }
                 });
@@ -290,22 +293,16 @@ async fn main() {
                         if pong_cnt + 2 < ping_cnt {
                             log::info!("No pongs, close");
                             let val = tx2.send(None).await;
-                            match val {
-                                Ok(_) => {},
-                                Err(err) => {
-                                    log::warn!("Invalid close tx {:?}", err);
-                                }
+                            if let Err(err) = val {
+                                log::warn!("Invalid close tx {:?}", err);
                             }
                             break;
                         }
                         interval.tick().await;
                         let val = tx2.send(Some(Ok(Message::ping(Vec::new())))).await;
-                        match val {
-                            Ok(_) => {},
-                            Err(err) => {
-                                log::info!("Invalid ping tx {:?}", err);
-                                break;
-                            }
+                        if let Err(err) = val {
+                            log::info!("Invalid ping tx {:?}", err);
+                            break;
                         }
                     }
                 });
@@ -314,15 +311,11 @@ async fn main() {
                 async move {
                     while let Some(Some(Ok(msg))) = rx2.next().await {
                         let val = ws_tx.send(msg).await;
-                        match val {
-                            Ok(_) => {},
-                            Err(err) => {
-                                log::info!("Invalid ws tx {:?}", err);
-                                break;
-                            }
+                        if let Err(err) = val {
+                            log::info!("Invalid ws tx {:?}", err);
+                            break;
                         }
                     }
-                    log::info!("Signing off");
                     let tx = tx_clone.clone();
                     let h = h.load(Ordering::SeqCst);
                     let ch = ch.load(Ordering::SeqCst);
