@@ -9,7 +9,7 @@ tokio = { version="1.19.2", features = ["full"] }
 tokio-stream = { version="0.1.9", features = ["net"] }
 tokio-util = { version="0.7.3", features = ["compat"] }
 tokio-rustls = "0.24.1"
-rustls-acme = { version="0.7", features = ["tokio"] }
+rustls-acme = { version="0.7", default-features = false, features = ["tokio"] }
 warp = "0.3.4"
 simple_logger = "2.1.0"
 clap = { version = "4", features = ["derive"] }
