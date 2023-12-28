@@ -130,16 +130,22 @@ async fn main() {
                 WsEvent::Init(h, ch, tx2, err_tx, msg) => {
                     if !uid_db.contains_key(&(h, ch)) {
                         msg_db.entry(ch).or_default();
-                        for tx in uid_db.values() {
-                                let res = tx.send(Some(Ok(msg.clone()))).await;
-                                    match res {
-                                        Err(err) => { log::info!("Got tx msg err {err}"); },
-                                        Ok(_) => {}
-                                    }
-                        }
                         uid_db.insert((h, ch), tx2.clone());
                         log::info!("Added {h:x} into {ch:x}.");
-                        let _ = err_tx.send(h);
+
+                        let val = err_tx.send(h);
+                        match val {
+                            Err(err) => { log::info!("Got err tx msg err {err}"); },
+                            Ok(_) => {}
+                        }
+
+                        for (_, tx) in uid_db.iter().filter(|(&(xh, xch), _)| xch == ch && xh != h) {
+                            let res = tx.send(Some(Ok(msg.clone()))).await;
+                            match res {
+                                Err(err) => { log::info!("Got tx msg err {err}"); },
+                                Ok(_) => {}
+                            }
+                        }
 
                         let queue = msg_db.get_mut(&ch);
                         if let Some(queue) = queue {
@@ -159,7 +165,7 @@ async fn main() {
 
                 }
                 WsEvent::Msg(h, ch, msg) => {
-                    for (_, tx) in uid_db.iter().filter(|(&(x, _), _)| x != h) {
+                    for (_, tx) in uid_db.iter().filter(|(&(xh, xch), _)| xch == ch && xh != h) {
                         let res = tx.send(Some(Ok(msg.clone()))).await;
                         match res {
                             Err(err) => { log::info!("Got tx snd msg err {err}"); },
