@@ -11,6 +11,10 @@ li {
     font-size: 18px;
 }
 
+pre {
+    font-size: 18px;
+}
+
 body {
     font-family: "Ubuntu Mono", monospace;
     background: rgb(189,189,189);
