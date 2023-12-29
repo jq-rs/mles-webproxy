@@ -1,0 +1,71 @@
+//Verifpal 0.7.5 model
+attacker[passive]
+
+principal Bob[
+	knows private name_bob
+	knows private channel
+	knows private key_string
+	knows private msg_bob
+	cbc_key_bob = HASH(key_string)
+	ecb_key_bob = HASH(cbc_key_bob)
+	cipher_msg_bob_name = ENC(ecb_key_bob, name_bob)
+	hmac_cipher_msg_bob_name = MAC(ecb_key_bob, cipher_msg_bob_name)
+	cipher_msg_bob_channel = ENC(ecb_key_bob, channel)
+	hmac_cipher_msg_bob_channel = MAC(ecb_key_bob, cipher_msg_bob_channel)
+	cipher_msg_bob = ENC(cbc_key_bob, msg_bob)
+	hmac_cipher_msg_bob = MAC(ecb_key_bob, cipher_msg_bob)
+]
+
+principal Alice[
+	knows private name_alice
+	knows private channel
+	knows private key_string
+	knows private msg_alice
+	cbc_key_alice = HASH(key_string)
+	ecb_key_alice = HASH(cbc_key_alice)
+	cipher_msg_alice_name = ENC(ecb_key_alice, name_alice)
+	hmac_cipher_msg_alice_name = MAC(ecb_key_alice, cipher_msg_alice_name)
+	cipher_msg_alice_channel = ENC(ecb_key_alice, channel)
+	hmac_cipher_msg_alice_channel = MAC(ecb_key_alice, cipher_msg_alice_channel)
+	cipher_msg_alice = ENC(cbc_key_alice, msg_alice)
+	hmac_cipher_msg_alice = MAC(ecb_key_alice, cipher_msg_alice)
+]
+
+Alice -> Bob: cipher_msg_alice_name, hmac_cipher_msg_alice_name, cipher_msg_alice_channel, hmac_cipher_msg_alice_channel, cipher_msg_alice, hmac_cipher_msg_alice
+Bob -> Alice: cipher_msg_bob_name, hmac_cipher_msg_bob_name, cipher_msg_bob_channel, hmac_cipher_msg_bob_channel, cipher_msg_bob, hmac_cipher_msg_bob
+
+principal Bob[
+	_ = ASSERT(MAC(ecb_key_bob, cipher_msg_alice_name), hmac_cipher_msg_alice_name)?
+	_ = ASSERT(MAC(ecb_key_bob, cipher_msg_alice_channel), hmac_cipher_msg_alice_channel)?
+	_ = ASSERT(MAC(ecb_key_bob, cipher_msg_alice), hmac_cipher_msg_alice)?
+	from_channel_alice = DEC(ecb_key_bob, cipher_msg_alice_channel)
+	from_alice = DEC(ecb_key_bob, cipher_msg_alice_name)
+	msg_from_alice = DEC(cbc_key_bob, cipher_msg_alice)
+]
+
+principal Alice[
+	_ = ASSERT(MAC(ecb_key_alice, cipher_msg_bob_name), hmac_cipher_msg_bob_name)?
+	_ = ASSERT(MAC(ecb_key_alice, cipher_msg_bob_channel), hmac_cipher_msg_bob_channel)?
+	_ = ASSERT(MAC(ecb_key_alice, cipher_msg_bob), hmac_cipher_msg_bob)?
+	from_channel_bob = DEC(ecb_key_alice, cipher_msg_bob_channel)
+	from_bob = DEC(ecb_key_alice, cipher_msg_bob_name)
+	msg_from_bob = DEC(cbc_key_alice, cipher_msg_bob)
+]
+
+queries[
+	confidentiality? msg_bob
+	confidentiality? msg_alice
+	confidentiality? msg_from_bob
+	confidentiality? msg_from_alice
+	confidentiality? key_string
+	confidentiality? ecb_key_bob
+	confidentiality? ecb_key_alice
+	confidentiality? cbc_key_bob
+	confidentiality? cbc_key_alice
+	confidentiality? from_alice
+	confidentiality? from_bob
+	authentication? Bob -> Alice: cipher_msg_bob
+	authentication? Alice -> Bob: cipher_msg_alice
+	authentication? Bob -> Alice: cipher_msg_bob_name
+	authentication? Alice -> Bob: cipher_msg_alice_name
+]
