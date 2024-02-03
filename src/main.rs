@@ -340,7 +340,6 @@ async fn main() {
         let domains = args.domains.clone();
         let mut http_index = Vec::new();
         for domain in domains {
-            let domain_inner = domain.clone();
             let redirect = warp::get()
                 .and(warp::header::<String>("host"))
                 .and(warp::path::tail())
@@ -348,7 +347,7 @@ async fn main() {
                 .map(move |uri: String, path: warp::path::Tail, addr: Option<SocketAddr>| {
                     (
                         uri,
-                        domain_inner.clone(),
+                        domain.clone(),
                         path,
                         addr,
                         )
@@ -371,7 +370,6 @@ async fn main() {
     let mut vindex = Vec::new();
     for domain in args.domains {
         let www_root = www_root_dir.clone();
-        let domain_inner = domain.clone();
         let index = warp::get()
             .and(warp::header::<String>("host"))
             .and(warp::path::tail())
@@ -379,7 +377,7 @@ async fn main() {
             .map(move |uri: String, path: warp::path::Tail, addr: Option<SocketAddr>| {
                 (
                     uri,
-                    domain_inner.clone(),
+                    domain.clone(),
                     www_root.to_str().unwrap().to_string(),
                     path,
                     addr,
