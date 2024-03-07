@@ -2,11 +2,14 @@
 Description=Mles WebProxy Service
 
 [Service]
+Environment=RUST_LOG=info
 WorkingDirectory = /home/ubuntu/www/mles-webproxy
 ExecStart = /home/ubuntu/www/mles-webproxy/mles-webproxy-manage.sh start
 ExecStop = /home/ubuntu/www/mles-webproxy/mles-webproxy-manage.sh stop
 Restart=always
-StandardOutput=null
+CPUQuota=0.2%
+CPUQuotaPeriodSec=1000ms
+#StandardOutput=null
 
 [Install]
 WantedBy=multi-user.target
