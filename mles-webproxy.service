@@ -7,7 +7,7 @@ WorkingDirectory = /home/ubuntu/www/mles-webproxy
 ExecStart = /home/ubuntu/www/mles-webproxy/mles-webproxy-manage.sh start
 ExecStop = /home/ubuntu/www/mles-webproxy/mles-webproxy-manage.sh stop
 Restart=always
-CPUQuota=0.2%
+CPUQuota=0.3%
 CPUQuotaPeriodSec=1000ms
 #StandardOutput=null
 

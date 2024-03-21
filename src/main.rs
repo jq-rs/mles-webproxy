@@ -4,8 +4,10 @@
  *
  *  Copyright (C) 2023  Mles developers
  */
+use async_compression::tokio::write::BrotliEncoder;
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
+use http_types::mime;
 use rustls_acme::caches::DirCache;
 use rustls_acme::AcmeConfig;
 use serde::{Deserialize, Serialize};
@@ -22,6 +24,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt as _;
 use tokio::net::TcpSocket;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
@@ -34,7 +37,6 @@ use warp::filters::BoxedFilter;
 use warp::http::StatusCode;
 use warp::ws::Message;
 use warp::Filter;
-use http_types::mime;
 
 #[derive(Serialize, Deserialize, Hash)]
 struct MlesHeader {
@@ -112,7 +114,7 @@ fn add_message(msg: Message, limit: u32, queue: &mut VecDeque<Message>) {
     queue.push_back(msg);
 }
 
-fn create_tcp_incoming(addr: SocketAddr) -> io::Result<TcpListenerStream>  {
+fn create_tcp_incoming(addr: SocketAddr) -> io::Result<TcpListenerStream> {
     let socket = TcpSocket::new_v6()?;
     socket.set_keepalive(true)?;
     socket.set_nodelay(true)?;
@@ -372,10 +374,8 @@ async fn main() -> io::Result<()> {
             let addr = format!("[{}]:{}", Ipv6Addr::UNSPECIFIED, 80)
                 .parse()
                 .unwrap();
-            if let Ok(tcp_incoming)  = create_tcp_incoming(addr) {
-                warp::serve(hindex)
-                    .run_incoming(tcp_incoming)
-                    .await;
+            if let Ok(tcp_incoming) = create_tcp_incoming(addr) {
+                warp::serve(hindex).run_incoming(tcp_incoming).await;
             }
         });
     }
@@ -384,17 +384,22 @@ async fn main() -> io::Result<()> {
     for domain in args.domains {
         let www_root = www_root_dir.clone();
         let index = warp::get()
+            .and(warp::header::optional::<String>("accept-encoding"))
             .and(warp::header::<String>("host"))
             .and(warp::path::tail())
-            .map(move |uri: String, path: warp::path::Tail| {
-                (
-                    uri,
-                    domain.clone(),
-                    www_root.to_str().unwrap().to_string(),
-                    path,
-                )
-            })
+            .map(
+                move |encoding: Option<String>, uri: String, path: warp::path::Tail| {
+                    (
+                        encoding,
+                        uri,
+                        domain.clone(),
+                        www_root.to_str().unwrap().to_string(),
+                        path,
+                    )
+                },
+            )
             .and_then(dyn_reply);
+
         vindex.push(index);
     }
 
@@ -424,10 +429,17 @@ async fn dyn_hreply(
     )))
 }
 
+async fn compress(in_data: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut encoder = BrotliEncoder::new(Vec::new());
+    encoder.write_all(in_data).await?;
+    encoder.shutdown().await?;
+    Ok(encoder.into_inner())
+}
+
 async fn dyn_reply(
-    tuple: (String, String, String, warp::path::Tail),
+    tuple: (Option<String>, String, String, String, warp::path::Tail),
 ) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
-    let (uri, domain, www_root, tail) = tuple;
+    let (encoding, uri, domain, www_root, tail) = tuple;
 
     if uri != domain {
         return Err(warp::reject::not_found());
@@ -440,22 +452,30 @@ async fn dyn_reply(
     log::debug!("Tail {}", tail.as_str());
     log::debug!("Accessing {file_path}...");
 
-    let parts: Vec<&str> = file_path.split('.').collect();
-
-    let ctype = match parts.last() {
-            Some(v) => {
-                let mime = mime::Mime::from_extension(*v);
-                match mime {
-                    Some(mime) => mime.basetype().to_string(),
-                    None => mime::ANY.basetype().to_string()
-                }
-            }
-            None => mime::ANY.basetype().to_string()
-        };
-
     // Open the file
     match File::open(&file_path).await {
         Ok(mut file) => {
+            let parts: Vec<&str> = file_path.split('.').collect();
+            if let Some(parts) = parts.last() {
+                log::debug!("Last part {}", parts);
+            }
+
+            let ctype = match parts.last() {
+                Some(v) => {
+                    let mime = mime::Mime::from_extension(*v);
+                    match mime {
+                        Some(mime) => mime.basetype().to_string(),
+                        None => match *v {
+                            "png" => mime::PNG.basetype().to_string(),
+                            "jpg" => mime::JPEG.basetype().to_string(),
+                            "ico" => mime::ICO.basetype().to_string(),
+                            _ => mime::ANY.basetype().to_string(),
+                        },
+                    }
+                }
+                None => mime::ANY.basetype().to_string(),
+            };
+
             // Read the file content into a Vec<u8>
             let mut buffer = Vec::new();
             if (file.read_to_end(&mut buffer).await).is_err() {
@@ -465,10 +485,28 @@ async fn dyn_reply(
                     StatusCode::INTERNAL_SERVER_ERROR,
                 )));
             }
-            log::debug!("...OK.");
-
-            // Create a custom response with the file content
-            Ok(Box::new(warp::reply::with_header(warp::reply::Response::new(buffer.into()), "Content-Type", &ctype)))
+            log::debug!("...OK, ctype {ctype}.");
+            if let Some(encoding) = encoding {
+                if encoding.contains("br") && !ctype.contains("image") {
+                    if let Ok(buffer) = compress(&buffer).await {
+                        // Create a custom response with the file content
+                        return Ok(Box::new(warp::reply::with_header(
+                            warp::reply::with_header(
+                                warp::reply::Response::new(buffer.into()),
+                                "Content-Type",
+                                &ctype,
+                            ),
+                            "Content-Encoding",
+                            "br",
+                        )));
+                    }
+                }
+            }
+            Ok(Box::new(warp::reply::with_header(
+                warp::reply::Response::new(buffer.into()),
+                "Content-Type",
+                &ctype,
+            )))
         }
         Err(_) => {
             // Handle the case where the file doesn't exist or other errors
