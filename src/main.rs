@@ -2,9 +2,11 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/.
  *
- *  Copyright (C) 2023  Mles developers
+ *  Copyright (C) 2023-2024  Mles developers
  */
 use async_compression::tokio::write::BrotliEncoder;
+use async_compression::Level::Fastest;
+use async_compression::brotli;
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use http_types::mime;
@@ -430,7 +432,9 @@ async fn dyn_hreply(
 }
 
 async fn compress(in_data: &[u8]) -> std::io::Result<Vec<u8>> {
-    let mut encoder = BrotliEncoder::new(Vec::new());
+    let params = brotli::EncoderParams::default()
+        .text_mode();
+    let mut encoder = BrotliEncoder::with_quality_and_params(Vec::new(), Fastest, params);
     encoder.write_all(in_data).await?;
     encoder.shutdown().await?;
     Ok(encoder.into_inner())
