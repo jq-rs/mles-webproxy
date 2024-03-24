@@ -491,7 +491,7 @@ async fn dyn_reply(
             }
             log::debug!("...OK, ctype {ctype}.");
             if let Some(encoding) = encoding {
-                if encoding.contains("br") && !ctype.contains("image") {
+                if encoding.contains("br") && ctype.contains("text") {
                     if let Ok(buffer) = compress(&buffer).await {
                         // Create a custom response with the file content
                         return Ok(Box::new(warp::reply::with_header(
