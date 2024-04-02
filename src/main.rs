@@ -473,6 +473,7 @@ async fn dyn_reply(
                             "png" => mime::PNG.basetype().to_string(),
                             "jpg" => mime::JPEG.basetype().to_string(),
                             "ico" => mime::ICO.basetype().to_string(),
+                            "apk" => "application/vnd.android.package-archive".to_string(),
                             _ => mime::ANY.basetype().to_string(),
                         },
                     }
@@ -494,22 +495,26 @@ async fn dyn_reply(
                 if encoding.contains("br") && ctype.contains("text") {
                     if let Ok(buffer) = compress(&buffer).await {
                         // Create a custom response with the file content
-                        return Ok(Box::new(warp::reply::with_header(
-                            warp::reply::with_header(
-                                warp::reply::Response::new(buffer.into()),
-                                "Content-Type",
-                                &ctype,
-                            ),
-                            "Content-Encoding",
-                            "br",
+                        return Ok(Box::new(warp::reply::with_header(warp::reply::with_header(
+                                        warp::reply::with_header(
+                                            warp::reply::Response::new(buffer.into()),
+                                            "Content-Type",
+                                            &ctype
+                                            ),
+                                            "Content-Encoding",
+                                            "br"),
+                                    "Access-Control-Allow-Origin",
+                                    "*"
                         )));
                     }
                 }
             }
-            Ok(Box::new(warp::reply::with_header(
-                warp::reply::Response::new(buffer.into()),
-                "Content-Type",
-                &ctype,
+            Ok(Box::new(warp::reply::with_header(warp::reply::with_header(
+                            warp::reply::Response::new(buffer.into()),
+                            "Content-Type",
+                            &ctype),
+                        "Access-Control-Allow-Origin",
+                        "*"
             )))
         }
         Err(_) => {
