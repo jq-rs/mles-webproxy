@@ -4,9 +4,9 @@
  *
  *  Copyright (C) 2023-2024  Mles developers
  */
+use async_compression::brotli;
 use async_compression::tokio::write::BrotliEncoder;
 use async_compression::Level::Fastest;
-use async_compression::brotli;
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use http_types::mime;
@@ -432,12 +432,19 @@ async fn dyn_hreply(
 }
 
 async fn compress(in_data: &[u8]) -> std::io::Result<Vec<u8>> {
-    let params = brotli::EncoderParams::default()
-        .text_mode();
+    let params = brotli::EncoderParams::default().text_mode();
     let mut encoder = BrotliEncoder::with_quality_and_params(Vec::new(), Fastest, params);
     encoder.write_all(in_data).await?;
     encoder.shutdown().await?;
     Ok(encoder.into_inner())
+}
+
+#[derive(Debug)]
+enum ReplyHeaders {
+    NONE,
+    Br,
+    AllowOrigin,
+    BrWithAllowOrigin,
 }
 
 async fn dyn_reply(
@@ -468,17 +475,41 @@ async fn dyn_reply(
                 Some(v) => {
                     let mime = mime::Mime::from_extension(*v);
                     match mime {
-                        Some(mime) => mime.basetype().to_string(),
+                        Some(mime) => format!(
+                            "{}/{}",
+                            mime.basetype().to_string(),
+                            mime.subtype().to_string()
+                        ),
                         None => match *v {
-                            "png" => mime::PNG.basetype().to_string(),
-                            "jpg" => mime::JPEG.basetype().to_string(),
-                            "ico" => mime::ICO.basetype().to_string(),
+                            "png" => format!(
+                                "{}/{}",
+                                mime::PNG.basetype().to_string(),
+                                mime::PNG.subtype().to_string()
+                            ),
+                            "jpg" => format!(
+                                "{}/{}",
+                                mime::JPEG.basetype().to_string(),
+                                mime::JPEG.subtype().to_string()
+                            ),
+                            "ico" => format!(
+                                "{}/{}",
+                                mime::ICO.basetype().to_string(),
+                                mime::ICO.subtype().to_string()
+                            ),
                             "apk" => "application/vnd.android.package-archive".to_string(),
-                            _ => mime::ANY.basetype().to_string(),
+                            _ => format!(
+                                "{}/{}",
+                                mime::ANY.basetype().to_string(),
+                                mime::ANY.subtype().to_string()
+                            ),
                         },
                     }
                 }
-                None => mime::ANY.basetype().to_string(),
+                None => format!(
+                    "{}/{}",
+                    mime::ANY.basetype().to_string(),
+                    mime::ANY.subtype().to_string()
+                ),
             };
 
             // Read the file content into a Vec<u8>
@@ -491,31 +522,73 @@ async fn dyn_reply(
                 )));
             }
             log::debug!("...OK, ctype {ctype}.");
+
+            let mut reply_headers = ReplyHeaders::NONE;
+            let mut use_br = false;
             if let Some(encoding) = encoding {
                 if encoding.contains("br") && ctype.contains("text") {
-                    if let Ok(buffer) = compress(&buffer).await {
-                        // Create a custom response with the file content
-                        return Ok(Box::new(warp::reply::with_header(warp::reply::with_header(
-                                        warp::reply::with_header(
-                                            warp::reply::Response::new(buffer.into()),
-                                            "Content-Type",
-                                            &ctype
-                                            ),
-                                            "Content-Encoding",
-                                            "br"),
-                                    "Access-Control-Allow-Origin",
-                                    "*"
-                        )));
+                    if let Ok(compressed_buffer) = compress(&buffer).await {
+                        buffer = compressed_buffer;
+                        reply_headers = ReplyHeaders::Br;
+                        use_br = true;
                     }
                 }
             }
-            Ok(Box::new(warp::reply::with_header(warp::reply::with_header(
+            let mut use_allow_origin = false;
+            if ctype.contains("json") {
+                use_allow_origin = true;
+                reply_headers = ReplyHeaders::AllowOrigin;
+            }
+            if use_br && use_allow_origin {
+                reply_headers = ReplyHeaders::BrWithAllowOrigin;
+            }
+            log::debug!("Reply headers: {reply_headers:?}");
+            match reply_headers {
+                ReplyHeaders::NONE => {
+                    return Ok(Box::new(warp::reply::with_header(
+                        warp::reply::Response::new(buffer.into()),
+                        "Content-Type",
+                        &ctype,
+                    )));
+                }
+                ReplyHeaders::Br => {
+                    return Ok(Box::new(warp::reply::with_header(
+                        warp::reply::with_header(
                             warp::reply::Response::new(buffer.into()),
                             "Content-Type",
-                            &ctype),
+                            &ctype,
+                        ),
+                        "Content-Encoding",
+                        "br",
+                    )));
+                }
+                ReplyHeaders::AllowOrigin => {
+                    return Ok(Box::new(warp::reply::with_header(
+                        warp::reply::with_header(
+                            warp::reply::Response::new(buffer.into()),
+                            "Content-Type",
+                            &ctype,
+                        ),
                         "Access-Control-Allow-Origin",
-                        "*"
-            )))
+                        "*",
+                    )));
+                }
+                ReplyHeaders::BrWithAllowOrigin => {
+                    return Ok(Box::new(warp::reply::with_header(
+                        warp::reply::with_header(
+                            warp::reply::with_header(
+                                warp::reply::Response::new(buffer.into()),
+                                "Content-Type",
+                                &ctype,
+                            ),
+                            "Content-Encoding",
+                            "br",
+                        ),
+                        "Access-Control-Allow-Origin",
+                        "*",
+                    )));
+                }
+            }
         }
         Err(_) => {
             // Handle the case where the file doesn't exist or other errors
