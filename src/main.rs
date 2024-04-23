@@ -6,7 +6,7 @@
  */
 use async_compression::brotli;
 use async_compression::tokio::write::{BrotliEncoder, ZstdEncoder};
-use async_compression::Level::Fastest;
+use async_compression::Level::Precise;
 use clap::Parser;
 use futures_util::{SinkExt, StreamExt};
 use http_types::mime;
@@ -86,8 +86,8 @@ struct Args {
 }
 
 const ACCEPTED_PROTOCOL: &str = "mles-websocket";
-const TASK_BUF: usize = 16;
-const WS_BUF: usize = 128;
+const TASK_BUF: usize = 4000; 
+const WS_BUF: usize = 8000;
 const HISTORY_LIMIT: &str = "200";
 const TLS_PORT: &str = "443";
 const PING_INTERVAL: u64 = 12000;
@@ -283,6 +283,10 @@ async fn main() -> io::Result<()> {
                     }
                     let tx2_sign = tx2_inner.clone();
                     while let Some(Ok(msg)) = ws_rx.next().await {
+                        if 0 == h.load(Ordering::SeqCst) {
+                            log::warn!("Invalid h, bailing");
+                            break;
+                        }
                         let tx2 = tx2_sign.clone();
                         if msg.is_pong() {
                             pong_cntr_inner.fetch_add(1, Ordering::Relaxed);
@@ -309,7 +313,11 @@ async fn main() -> io::Result<()> {
                 let tx2_inner = tx2.clone();
                 let ping_cntr_inner = ping_cntr.clone();
                 let pong_cntr_inner = pong_cntr.clone();
+                let h_clone = h.clone();
+                let ch_clone = ch.clone();
                 tokio::spawn(async move {
+                    let h = h_clone;
+                    let ch = ch_clone;
                     let mut interval = time::interval(Duration::from_millis(PING_INTERVAL));
                     interval.tick().await;
 
@@ -318,8 +326,8 @@ async fn main() -> io::Result<()> {
                         let ping_cnt = ping_cntr_inner.fetch_add(1, Ordering::Relaxed);
                         let pong_cnt = pong_cntr_inner.load(Ordering::Relaxed);
                         let tx2 = tx2_clone.clone();
-                        if pong_cnt + 2 < ping_cnt {
-                            log::info!("No pongs, close");
+                        if pong_cnt + 3 < ping_cnt {
+                            log::info!("No pongs for {:x} of {:x}, close", h.load(Ordering::SeqCst),ch.load(Ordering::SeqCst));
                             let val = tx2.send(None).await;
                             if let Err(err) = val {
                                 log::warn!("Invalid close tx {:?}", err);
@@ -345,11 +353,13 @@ async fn main() -> io::Result<()> {
                         }
                     }
                     let tx = tx_clone.clone();
-                    let h = h.load(Ordering::SeqCst);
-                    let ch = ch.load(Ordering::SeqCst);
-                    if h != 0 && ch != 0 {
-                        let _ = tx.send(WsEvent::Logoff(h, ch)).await;
+                    let hval = h.load(Ordering::SeqCst);
+                    let chval = ch.load(Ordering::SeqCst);
+                    if hval != 0 && chval != 0 {
+                        let _ = tx.send(WsEvent::Logoff(hval, chval)).await;
                     }
+                    h.store(0, Ordering::SeqCst);
+                    ch.store(0, Ordering::SeqCst);
                 }
             })
         })
@@ -436,13 +446,13 @@ async fn dyn_hreply(
 
 async fn compress(comptype: &str, in_data: &[u8]) -> std::io::Result<Vec<u8>> {
     if comptype == ZSTD {
-        let mut encoder = ZstdEncoder::with_quality(Vec::new(), Fastest);
+        let mut encoder = ZstdEncoder::with_quality(Vec::new(), Precise(2));
         encoder.write_all(in_data).await?;
         encoder.shutdown().await?;
         return Ok(encoder.into_inner());
     } else {
         let params = brotli::EncoderParams::default().text_mode();
-        let mut encoder = BrotliEncoder::with_quality_and_params(Vec::new(), Fastest, params);
+        let mut encoder = BrotliEncoder::with_quality_and_params(Vec::new(), Precise(2), params);
         encoder.write_all(in_data).await?;
         encoder.shutdown().await?;
         Ok(encoder.into_inner())
