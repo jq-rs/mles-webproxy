@@ -366,7 +366,7 @@ async fn main() -> io::Result<()> {
                             break;
                         }
                     }
-                    let _val = ws_tx.close().await;
+                    let _val = ws_tx.send(Message::close()).await;
 
                     let hval = h.load(Ordering::SeqCst);
                     let chval = ch.load(Ordering::SeqCst);
