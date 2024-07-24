@@ -43,7 +43,7 @@ use tokio::sync::Semaphore;
 
 const BR: &str = "br";
 const ZSTD: &str = "zstd";
-const MAX_FILES_OPEN: usize = 512;
+const MAX_FILES_OPEN: usize = 128;
 
 #[derive(Serialize, Deserialize, Hash)]
 struct MlesHeader {
@@ -137,6 +137,7 @@ async fn main() -> io::Result<()> {
     let args = Args::parse();
     let limit = args.limit;
     let www_root_dir = args.wwwroot;
+    let semaphore = Arc::new(Semaphore::new(MAX_FILES_OPEN));
 
     let (tx, rx) = mpsc::channel::<WsEvent>(TASK_BUF);
     let mut rx = ReceiverStream::new(rx);
@@ -151,6 +152,16 @@ async fn main() -> io::Result<()> {
         .cache_option(args.cache.clone().map(DirCache::new))
         .directory_lets_encrypt(!args.staging)
         .tokio_incoming(tcp_incoming, Vec::new());
+
+    // Wrap the incoming connections stream with a filter to enforce a connection limit
+    let sem_inner = semaphore.clone();
+    let tls_incoming = tls_incoming.filter_map(move |conn| {
+        let sem = sem_inner.clone();
+        async move {
+            let _permit = sem.acquire().await;
+            Some(conn)
+        }
+    });
 
     tokio::spawn(async move {
         let mut msg_db: HashMap<u64, VecDeque<Message>> = HashMap::new();
@@ -413,7 +424,6 @@ async fn main() -> io::Result<()> {
     }
 
     let mut vindex = Vec::new();
-    let semaphore = Arc::new(Semaphore::new(MAX_FILES_OPEN));
     for domain in args.domains {
         let sem = semaphore.clone();
         let www_root = www_root_dir.clone();
@@ -502,10 +512,10 @@ async fn dyn_reply(
         path = "index.html";
     }
     let file_path = format!("{}/{}/{}", www_root, uri, path);
-    log::debug!("Tail {}", tail.as_str());
 
     let _permit = semaphore.acquire().await.unwrap();
 
+    log::debug!("Avail file permits {}", semaphore.available_permits());
     log::debug!("Accessing {file_path}...");
 
     // Open the file
