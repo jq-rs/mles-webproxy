@@ -39,9 +39,11 @@ use warp::filters::BoxedFilter;
 use warp::http::StatusCode;
 use warp::ws::Message;
 use warp::Filter;
+use tokio::sync::Semaphore;
 
 const BR: &str = "br";
 const ZSTD: &str = "zstd";
+const MAX_FILES_OPEN: usize = 512;
 
 #[derive(Serialize, Deserialize, Hash)]
 struct MlesHeader {
@@ -411,7 +413,9 @@ async fn main() -> io::Result<()> {
     }
 
     let mut vindex = Vec::new();
+    let semaphore = Arc::new(Semaphore::new(MAX_FILES_OPEN));
     for domain in args.domains {
+        let sem = semaphore.clone();
         let www_root = www_root_dir.clone();
         let index = warp::get()
             .and(warp::header::optional::<String>("accept-encoding"))
@@ -425,6 +429,7 @@ async fn main() -> io::Result<()> {
                         domain.clone(),
                         www_root.to_str().unwrap().to_string(),
                         path,
+                        sem.clone()
                     )
                 },
             )
@@ -485,9 +490,9 @@ enum ReplyHeaders {
 }
 
 async fn dyn_reply(
-    tuple: (Option<String>, String, String, String, warp::path::Tail),
+    tuple: (Option<String>, String, String, String, warp::path::Tail, Arc<Semaphore>),
 ) -> Result<Box<dyn warp::Reply>, warp::Rejection> {
-    let (encoding, uri, domain, www_root, tail) = tuple;
+    let (encoding, uri, domain, www_root, tail, semaphore) = tuple;
 
     if uri != domain {
         return Err(warp::reject::not_found());
@@ -498,6 +503,9 @@ async fn dyn_reply(
     }
     let file_path = format!("{}/{}/{}", www_root, uri, path);
     log::debug!("Tail {}", tail.as_str());
+
+    let _permit = semaphore.acquire().await.unwrap();
+
     log::debug!("Accessing {file_path}...");
 
     // Open the file
