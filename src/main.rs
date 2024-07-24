@@ -43,7 +43,6 @@ use tokio::sync::Semaphore;
 
 const BR: &str = "br";
 const ZSTD: &str = "zstd";
-const MAX_FILES_OPEN: usize = 128;
 
 #[derive(Serialize, Deserialize, Hash)]
 struct MlesHeader {
@@ -69,6 +68,10 @@ struct Args {
     #[arg(short, long, default_value = HISTORY_LIMIT, value_parser = clap::value_parser!(u32).range(1..1_000_000))]
     limit: u32,
 
+    /// Open files limit
+    #[arg(short, long, default_value = MAX_FILES_OPEN, value_parser = clap::value_parser!(u32).range(1..1_000_000))]
+    filelimit: u32,
+
     /// Www-root directory for domain(s) (e.g. /path/static where domain example.io goes to
     /// static/example.io)
     #[arg(short, long, required = true)]
@@ -91,6 +94,7 @@ const ACCEPTED_PROTOCOL: &str = "mles-websocket";
 const TASK_BUF: usize = 16;
 const WS_BUF: usize = 128;
 const HISTORY_LIMIT: &str = "200";
+const MAX_FILES_OPEN: &str = "256";
 const TLS_PORT: &str = "443";
 const PING_INTERVAL: u64 = 24000;
 const BACKLOG: u32 = 1024;
@@ -136,8 +140,9 @@ async fn main() -> io::Result<()> {
     simple_logger::init_with_env().unwrap();
     let args = Args::parse();
     let limit = args.limit;
+    let filelimit = args.filelimit;
     let www_root_dir = args.wwwroot;
-    let semaphore = Arc::new(Semaphore::new(MAX_FILES_OPEN));
+    let semaphore = Arc::new(Semaphore::new(filelimit as usize));
 
     let (tx, rx) = mpsc::channel::<WsEvent>(TASK_BUF);
     let mut rx = ReceiverStream::new(rx);
@@ -522,10 +527,6 @@ async fn dyn_reply(
     match File::open(&file_path).await {
         Ok(mut file) => {
             let parts: Vec<&str> = file_path.split('.').collect();
-            if let Some(parts) = parts.last() {
-                log::debug!("Last part {}", parts);
-            }
-
             let ctype = match parts.last() {
                 Some(v) => {
                     let mime = mime::Mime::from_extension(*v);
