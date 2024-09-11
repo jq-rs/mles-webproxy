@@ -26,7 +26,10 @@
 MlesTalk is an open-source character-by-character messenger between users on the same channel. See how everyone is writing their messages, character by character! Exchange thoughts faster! Avoid centralized services of big corporations, their data collection and the sale of your personal metadata. <b>Your metadata is your data</b> with MlesTalk.
 </p>
 
-<p><a href="https://play.google.com/store/apps/details?id=io.mles.mlestalk"><img src="https://play.google.com/intl/en_us/badges/images/generic/en_badge_web_generic.png" width="300" alt="MlesTalk at Google Play" /></a></p>
+<p>
+<b>How to get it?</b><br /><br />
+You can side-load it with <a href="https://mles.io/mlestalk/mlestalk_3017.apk">direct download</a>. You may need to uninstall your MlesTalk from Google Play first as it is in bundle format and the new release is apk. No worries still, you'll get notifications about new upgrades with the side-loaded apk as well. Happy talking!</p>
+</p>
 
 <p>
 <b>Key features:</b>
@@ -38,7 +41,8 @@ MlesTalk is an open-source character-by-character messenger between users on the
 	<li>Respects privacy fully, does not collect any user information</li>
 	<li>Message notifications while in the background</li>
 	<li>Channels' user presence with back-button</li>
-	<li>Uses TLS encrypted Websocket connection, which does not leak any indirect information to big corporations</li>
+	<li>Uses TLS encrypted Websocket connection as transport layer</li>
+	<li>E2EE with shared key on the channel</li>
 	<li>Automated ephemeral key exchange with different font colour for group real-time messaging within the channel</li>
 	<li>Supports several languages for ease of use</li>
 	<li>Easy on battery</li>
@@ -62,7 +66,7 @@ By purchasing MlesTalk you support its existing internet server infrastructure a
 
 <ul>
 <li>MlesTalk-UI: User interface <a href="https://github.com/jq-rs/mlestalk-ui">source code</a></li>
-<li>MlesTalk WebWorker: Protocol implementation <a href="https://github.com/jq-rs/mlestalk-webworker">source code</a></li> 
+<li>Zpinc WebWorker: Protocol implementation <a href="https://github.com/jq-rs/zpinc-webworker">source code</a></li> 
 <li>Mles WebSocket proxy: <a href="https://github.com/jq-rs/mles-webproxy">source code</a></li>
 <li>Installation instructions for your own Mles WebSocket proxy: <a href="https://github.com/jq-rs/mles-webproxy/blob/jq-rs/crates.io/README.md">README</a></li>
 </ul>
@@ -87,7 +91,7 @@ By purchasing MlesTalk you support its existing internet server infrastructure a
 
 <p>Messages are sent over TLS protected connection by default which should be secure.</p>
 
-<p>In addition to transport-level TLS encryption, message data is obfuscated end-to-end using symmetrical Blowfish (56-bit, weak key) with ciphertext stealing (CTS), all-or-nothing transform (AONT), Blake2 HMAC and Padmé padding. The shared key is passed through the password-based key derivation function scrypt. For longer real-time communication, an ephemeral Burmester-Desmedt (BD) key is exchanged. When it is applied, it can be identified from a font colour change. While the message data is not plain text, please do note that this obfuscation does not protect from serious message opening efforts.</p>
+<p>In addition to transport-level TLS encryption, it is secured by <a href="https://github.com/ZpincDev/zpinc-webworker/raw/master/zpinc_paper.pdf">Zpinc protocol</a> for message authentication, integrity and confidentiality. Even though Zpinc protocol should be safe, it is not audited. It is open-source so you can check the code yourself, please report any issues! Pro bono professional auditors welcome as well!
 
 <h3>I cannot log into a channel with the same user name twice, i.e from the web GUI. What can I do?</h3>
 
