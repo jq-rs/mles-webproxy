@@ -1,6 +1,6 @@
 # mles-webproxy
 
-`mles-webproxy` is _deprecated_ in favor of Mles v2 and will be obsolete from the beginning of year 2024.
+`mles-webproxy` is _obsoleted_ in favor of Mles v2 and [Mles Client](https://github.com/jq-rs/mles-client).
 
 `mles-webproxy` is an Mles WebSocket proxy service for [Mles](https://github.com/jq-rs/mles-rs) WebSocket protocols, like [MlesTalk](https://mles.io/app.html). It receives traffic over TLS and forwards it transformed to AES towards Mles server (and vice versa).
 
